@@ -103,10 +103,10 @@ See [Scale-Up Plan](scaleup-plan.md) for full details.
 | Stage | Status |
 |-------|--------|
 | 1 each | done |
-| 1% | pending |
-| 10% | pending |
-| 50% | pending |
-| 100% | pending |
+| 1% | done |
+| 10% | done |
+| 50% | done |
+| 100% | done |
 
 ### Next steps (later)
 - Safety incident data overlay (crime heatmap)
