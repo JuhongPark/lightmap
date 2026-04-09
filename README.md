@@ -31,6 +31,7 @@ Documentation is being added. This section will be updated as new documents are 
 
 - [Project Description](docs/project.md) -- Problem, solution plan, architecture, data sources.
 - [Data Catalog](docs/data-catalog.md) -- All datasets, APIs, and validation results.
+- [Technology Research](docs/tech-research.md) -- Tech stack, decisions, and competitor analysis.
 - [Course Information](docs/course.md) -- MIT 1.001 course details and grading rubric.
 
 ## License
