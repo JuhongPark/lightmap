@@ -12,7 +12,7 @@ from folium.plugins import HeatMap
 from shadow.compute import compute_all_shadows, get_sun_position
 
 BOSTON_TZ = ZoneInfo("US/Eastern")
-MAP_CENTER = [42.38, -71.10]
+MAP_CENTER = [42.36, -71.08]
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "docs")
 
@@ -165,8 +165,7 @@ def build_day_map(target_time, altitude, azimuth, scale_pct):
     shadows, _, _ = compute_all_shadows(tmp_path, target_time)
     print(f"  Shadows computed: {len(shadows)}")
 
-    zoom = 12 if building_count > 500 else 13 if building_count > 50 else 14
-    m = folium.Map(location=MAP_CENTER, zoom_start=zoom, tiles="CartoDB positron")
+    m = folium.Map(location=MAP_CENTER, zoom_start=14, tiles="CartoDB positron")
 
     folium.GeoJson(
         building_data,
@@ -206,8 +205,7 @@ def build_day_map(target_time, altitude, azimuth, scale_pct):
 
 
 def build_night_map(target_time, altitude, azimuth, scale_pct):
-    zoom = 12 if scale_pct > 10 else 12
-    m = folium.Map(location=MAP_CENTER, zoom_start=zoom, tiles="CartoDB dark_matter")
+    m = folium.Map(location=MAP_CENTER, zoom_start=14, tiles="CartoDB dark_matter")
 
     print("Loading streetlights...")
     coords = load_streetlights(scale_pct)

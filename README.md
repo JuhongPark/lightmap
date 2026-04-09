@@ -6,6 +6,12 @@ An interactive web map that shows where shade falls during the day and where lig
 
 Built by **Juhong Park** (System Design and Management, MIT) as a term project for [**MIT 1.001: Engineering Computation and Data Science**](https://student.mit.edu/catalog/search.cgi?search=1.001) (Spring 2026), taught by [Abel Sanchez](https://abel.mit.edu/) and [John R. Williams](https://johntango.github.io/). Course website: [onexi.org](https://onexi.org).
 
+## Preview
+
+| Day (Shadow Map) | Night (Brightness Map) |
+| --- | --- |
+| ![Day mode](docs/screenshots/day.png) | ![Night mode](docs/screenshots/night.png) |
+
 ## Tech Stack
 
 | Layer | Technologies |
