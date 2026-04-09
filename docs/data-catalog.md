@@ -1,6 +1,6 @@
 # Data Catalog
 
-Last verified: **2026-04-08**. All URLs, record counts, column names, and API responses confirmed.
+Last updated: **2026-04-08**. All URLs, record counts, column names, and API responses verified.
 
 ## Boston (data.boston.gov)
 
