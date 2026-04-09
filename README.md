@@ -18,8 +18,8 @@ Built by **Juhong Park** (System Design and Management, MIT) as a term project f
 
 The shadow engine computes sun position (pvlib) and projects each building footprint along the opposite azimuth. The brightness map renders streetlight density as a heatmap. Both scale from a single building to the full dataset:
 
-| Scale | Day (Shadow Map) | Night (Brightness Map) |
-| --- | --- | --- |
+| Data&nbsp;Ratio | Day | Night |
+| :--: | --- | --- |
 | 1 each | <img src="docs/screenshots/day_1each.png" width="360"> | <img src="docs/screenshots/night_1each.png" width="360"> |
 | 1% | <img src="docs/screenshots/day_1pct.png" width="360"> | <img src="docs/screenshots/night_1pct.png" width="360"> |
 | 10% | <img src="docs/screenshots/day_10pct.png" width="360"> | <img src="docs/screenshots/night_10pct.png" width="360"> |
