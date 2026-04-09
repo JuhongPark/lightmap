@@ -2,159 +2,179 @@ import argparse
 import csv
 import json
 import os
+import random
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import folium
 from folium.plugins import HeatMap
-from shapely.geometry import Polygon, mapping
 
 from shadow.compute import compute_all_shadows, get_sun_position
 
 BOSTON_TZ = ZoneInfo("US/Eastern")
-BOSTON_CENTER = [42.355, -71.065]
+MAP_CENTER = [42.38, -71.10]
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "docs")
 
-# Hardcoded Boston test building: Prudential Tower area footprint
-# Approximate polygon near 800 Boylston St, height ~228m (749ft)
-BOSTON_TEST_BUILDING = {
-    "type": "Feature",
-    "properties": {"BLDG_HGT_2010": 749.0},
-    "geometry": mapping(Polygon([
-        (-71.0818, 42.3470),
-        (-71.0812, 42.3470),
-        (-71.0812, 42.3475),
-        (-71.0818, 42.3475),
-        (-71.0818, 42.3470),
-    ])),
-}
+BOSTON_BUILDINGS_PATH = os.path.join(DATA_DIR, "buildings", "boston_buildings.geojson")
+CAMBRIDGE_BUILDINGS_PATH = os.path.join(
+    DATA_DIR, "cambridge", "buildings", "buildings.geojson"
+)
+
+TOTAL_BOSTON_STREETLIGHTS = 74065
+TOTAL_CAMBRIDGE_STREETLIGHTS = 6117
+TOTAL_FOOD = 3207
 
 
-def load_cambridge_building(geojson_path):
-    with open(geojson_path) as f:
-        data = json.load(f)
-
-    for feat in data["features"]:
-        props = feat.get("properties", {})
-        top_gl = props.get("TOP_GL")
-        if top_gl is not None and top_gl > 10:
-            height_ft = top_gl * 3.28084
-            return {
-                "type": "Feature",
-                "properties": {"BLDG_HGT_2010": round(height_ft, 1)},
-                "geometry": feat["geometry"],
-            }
-    return None
+def _sample_count(total, scale_pct):
+    if scale_pct >= 100:
+        return total
+    return max(1, int(total * scale_pct / 100))
 
 
-def make_test_geojson(cambridge_path):
-    features = [BOSTON_TEST_BUILDING]
-    cam_building = load_cambridge_building(cambridge_path)
-    if cam_building:
-        features.append(cam_building)
+def load_buildings(scale_pct):
+    random.seed(42)
+    features = []
+
+    # Cambridge buildings
+    if os.path.exists(CAMBRIDGE_BUILDINGS_PATH):
+        with open(CAMBRIDGE_BUILDINGS_PATH) as f:
+            data = json.load(f)
+        valid = []
+        for feat in data["features"]:
+            props = feat.get("properties", {})
+            top_gl = props.get("TOP_GL")
+            if top_gl is not None and top_gl > 0:
+                new_feat = {
+                    "type": "Feature",
+                    "properties": {"BLDG_HGT_2010": round(top_gl * 3.28084, 1)},
+                    "geometry": feat["geometry"],
+                }
+                valid.append(new_feat)
+        n = _sample_count(len(valid), scale_pct)
+        sampled = random.sample(valid, min(n, len(valid)))
+        features.extend(sampled)
+        print(f"  Cambridge buildings: {len(sampled)}/{len(valid)}")
+
+    # Boston buildings
+    if os.path.exists(BOSTON_BUILDINGS_PATH):
+        with open(BOSTON_BUILDINGS_PATH) as f:
+            data = json.load(f)
+        valid = []
+        for feat in data["features"]:
+            props = feat.get("properties", {})
+            h = props.get("BLDG_HGT_2010")
+            if h is not None and h > 0:
+                valid.append(feat)
+        n = _sample_count(len(valid), scale_pct)
+        sampled = random.sample(valid, min(n, len(valid)))
+        features.extend(sampled)
+        print(f"  Boston buildings: {len(sampled)}/{len(valid)}")
+    else:
+        print("  Boston buildings: not downloaded")
+
     return {"type": "FeatureCollection", "features": features}
 
 
-def load_streetlights(max_per_city=1):
+def load_streetlights(scale_pct):
+    random.seed(42)
     coords = []
 
+    # Boston
     boston_path = os.path.join(DATA_DIR, "streetlights", "streetlights.csv")
     if os.path.exists(boston_path):
-        count = 0
+        all_boston = []
         with open(boston_path) as f:
             reader = csv.DictReader(f)
             for row in reader:
-                if count >= max_per_city:
-                    break
                 try:
                     lat = float(row["Lat"])
                     lon = float(row["Long"])
                     if 42.2 < lat < 42.5 and -71.2 < lon < -70.9:
-                        coords.append([lat, lon])
-                        count += 1
+                        all_boston.append([lat, lon])
                 except (ValueError, KeyError):
                     continue
-        print(f"  Boston streetlights: {count}")
+        n = _sample_count(len(all_boston), scale_pct)
+        sampled = random.sample(all_boston, min(n, len(all_boston)))
+        coords.extend(sampled)
+        print(f"  Boston streetlights: {len(sampled)}/{len(all_boston)}")
 
+    # Cambridge
     cam_path = os.path.join(DATA_DIR, "cambridge", "streetlights", "streetlights.geojson")
-    cam_count = 0
     if os.path.exists(cam_path):
+        all_cam = []
         with open(cam_path) as f:
             data = json.load(f)
         for feat in data["features"]:
-            if cam_count >= max_per_city:
-                break
             geom = feat.get("geometry", {})
             if geom.get("type") == "Point":
                 lon, lat = geom["coordinates"][:2]
                 if 42.2 < lat < 42.5 and -71.2 < lon < -70.9:
-                    coords.append([lat, lon])
-                    cam_count += 1
-        print(f"  Cambridge streetlights: {cam_count}")
+                    all_cam.append([lat, lon])
+        n = _sample_count(len(all_cam), scale_pct)
+        sampled = random.sample(all_cam, min(n, len(all_cam)))
+        coords.extend(sampled)
+        print(f"  Cambridge streetlights: {len(sampled)}/{len(all_cam)}")
 
     print(f"  Total streetlights: {len(coords)}")
     return coords
 
 
-def load_food_establishments(max_count=1):
+def load_food_establishments(scale_pct):
+    random.seed(42)
     path = os.path.join(DATA_DIR, "safety", "food_establishments.csv")
     if not os.path.exists(path):
         print("  Food establishments file not found.")
         return []
 
-    places = []
+    all_places = []
     with open(path) as f:
         reader = csv.DictReader(f)
         for row in reader:
-            if len(places) >= max_count:
-                break
             try:
                 lat = float(row["latitude"])
                 lon = float(row["longitude"])
                 name = row.get("businessname", "")
                 if 42.2 < lat < 42.5 and -71.2 < lon < -70.9:
-                    places.append({"lat": lat, "lon": lon, "name": name})
+                    all_places.append({"lat": lat, "lon": lon, "name": name})
             except (ValueError, KeyError):
                 continue
 
-    print(f"  Food establishments: {len(places)}")
-    return places
+    n = _sample_count(len(all_places), scale_pct)
+    sampled = random.sample(all_places, min(n, len(all_places)))
+    print(f"  Food establishments: {len(sampled)}/{len(all_places)}")
+    return sampled
 
 
-def build_day_map(target_time, altitude, azimuth):
-    cambridge_path = os.path.join(
-        DATA_DIR, "cambridge", "buildings", "buildings.geojson"
-    )
-    if not os.path.exists(cambridge_path):
-        print(f"ERROR: {cambridge_path} not found. Run scripts/download_data.py first.")
+def build_day_map(target_time, altitude, azimuth, scale_pct):
+    print("Loading buildings...")
+    building_data = load_buildings(scale_pct)
+    building_count = len(building_data["features"])
+    print(f"  Total buildings: {building_count}")
+
+    if building_count == 0:
+        print("ERROR: No buildings loaded.")
         return None
 
-    test_data = make_test_geojson(cambridge_path)
-    tmp_path = os.path.join(DATA_DIR, "_test_buildings.geojson")
+    tmp_path = os.path.join(DATA_DIR, "_scale_buildings.geojson")
     os.makedirs(os.path.dirname(tmp_path), exist_ok=True)
     with open(tmp_path, "w") as f:
-        json.dump(test_data, f)
+        json.dump(building_data, f)
 
-    building_count = len(test_data["features"])
-    print(f"Buildings: {building_count}")
-
+    print("Computing shadows...")
     shadows, _, _ = compute_all_shadows(tmp_path, target_time)
-    print(f"Shadows computed: {len(shadows)}")
+    print(f"  Shadows computed: {len(shadows)}")
 
-    m = folium.Map(
-        location=BOSTON_CENTER,
-        zoom_start=14,
-        tiles="CartoDB positron",
-    )
+    zoom = 12 if building_count > 500 else 13 if building_count > 50 else 14
+    m = folium.Map(location=MAP_CENTER, zoom_start=zoom, tiles="CartoDB positron")
 
     folium.GeoJson(
-        {"type": "FeatureCollection", "features": test_data["features"]},
+        building_data,
         name="Buildings",
         style_function=lambda x: {
             "fillColor": "#64748b",
             "color": "#475569",
-            "weight": 1,
+            "weight": 0.5,
             "fillOpacity": 0.6,
         },
     ).add_to(m)
@@ -165,7 +185,7 @@ def build_day_map(target_time, altitude, azimuth):
         style_function=lambda x: {
             "fillColor": "#1e293b",
             "color": "#1e293b",
-            "weight": 0.5,
+            "weight": 0.3,
             "fillOpacity": 0.4,
         },
     ).add_to(m)
@@ -174,26 +194,23 @@ def build_day_map(target_time, altitude, azimuth):
         f'<div style="position:fixed; top:10px; left:60px; z-index:1000;'
         f" background:rgba(255,255,255,0.9); padding:12px 16px;"
         f' border-radius:8px; font-family:sans-serif; font-size:13px;">'
-        f"<b>LightMap Prototype - Day</b><br>"
+        f"<b>LightMap Prototype - Day ({scale_pct}%)</b><br>"
         f"Time: {target_time.strftime('%Y-%m-%d %H:%M %Z')}<br>"
         f"Sun altitude: {altitude:.1f}&deg;<br>"
         f"Sun azimuth: {azimuth:.1f}&deg;<br>"
-        f"Buildings: {building_count} | Shadows: {len(shadows)}"
+        f"Buildings: {building_count:,} | Shadows: {len(shadows):,}"
         f"</div>"
     )
     m.get_root().html.add_child(folium.Element(info_html))
     return m
 
 
-def build_night_map(target_time, altitude, azimuth):
-    m = folium.Map(
-        location=[42.38, -71.10],
-        zoom_start=12,
-        tiles="CartoDB dark_matter",
-    )
+def build_night_map(target_time, altitude, azimuth, scale_pct):
+    zoom = 12 if scale_pct > 10 else 12
+    m = folium.Map(location=MAP_CENTER, zoom_start=zoom, tiles="CartoDB dark_matter")
 
     print("Loading streetlights...")
-    coords = load_streetlights()
+    coords = load_streetlights(scale_pct)
     if coords:
         HeatMap(
             coords,
@@ -210,7 +227,7 @@ def build_night_map(target_time, altitude, azimuth):
         ).add_to(m)
 
     print("Loading food establishments...")
-    places = load_food_establishments()
+    places = load_food_establishments(scale_pct)
     food_group = folium.FeatureGroup(name="Food Establishments")
     for p in places:
         folium.CircleMarker(
@@ -227,7 +244,7 @@ def build_night_map(target_time, altitude, azimuth):
         f'<div style="position:fixed; top:10px; left:60px; z-index:1000;'
         f" background:rgba(15,23,42,0.9); color:#e2e8f0; padding:12px 16px;"
         f' border-radius:8px; font-family:sans-serif; font-size:13px;">'
-        f"<b>LightMap Prototype - Night</b><br>"
+        f"<b>LightMap Prototype - Night ({scale_pct}%)</b><br>"
         f"Time: {target_time.strftime('%Y-%m-%d %H:%M %Z')}<br>"
         f"Sun altitude: {altitude:.1f}&deg;<br>"
         f"Streetlights: {len(coords):,} | Food: {len(places):,}"
@@ -237,19 +254,19 @@ def build_night_map(target_time, altitude, azimuth):
     return m
 
 
-def build_map(target_time):
+def build_map(target_time, scale_pct=1):
     altitude, azimuth = get_sun_position(target_time)
     is_day = altitude > 0
     mode = "Day" if is_day else "Night"
 
     print(f"Time: {target_time.strftime('%Y-%m-%d %H:%M %Z')}")
     print(f"Sun: altitude={altitude:.1f}, azimuth={azimuth:.1f}")
-    print(f"Mode: {mode}")
+    print(f"Mode: {mode} | Scale: {scale_pct}%")
 
     if is_day:
-        m = build_day_map(target_time, altitude, azimuth)
+        m = build_day_map(target_time, altitude, azimuth, scale_pct)
     else:
-        m = build_night_map(target_time, altitude, azimuth)
+        m = build_night_map(target_time, altitude, azimuth, scale_pct)
 
     if m is None:
         return None
@@ -276,6 +293,13 @@ def main():
         action="store_true",
         help="Force night mode (2026-07-15 22:00)",
     )
+    parser.add_argument(
+        "--scale",
+        type=int,
+        default=1,
+        choices=[1, 10, 50, 100],
+        help="Percent of data to use (1, 10, 50, 100)",
+    )
     args = parser.parse_args()
 
     if args.night:
@@ -284,7 +308,7 @@ def main():
         target_time = datetime.strptime(args.time, "%Y-%m-%d %H:%M")
         target_time = target_time.replace(tzinfo=BOSTON_TZ)
 
-    build_map(target_time)
+    build_map(target_time, args.scale)
 
 
 if __name__ == "__main__":

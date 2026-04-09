@@ -11,12 +11,12 @@ SCREENSHOT_DIR = os.path.join(DOCS_DIR, "screenshots")
 CHROME = "google-chrome"
 
 
-def run_prototype(args):
-    cmd = [sys.executable, "prototype.py"]
-    if args.night:
+def run_prototype(night=False, time=None, scale=1):
+    cmd = [sys.executable, "prototype.py", "--scale", str(scale)]
+    if night:
         cmd.append("--night")
-    elif args.time:
-        cmd.extend(["--time", args.time])
+    elif time:
+        cmd.extend(["--time", time])
     print(f"Running: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=SRC_DIR, capture_output=True, text=True)
     print(result.stdout)
@@ -48,18 +48,21 @@ def main():
     parser.add_argument("--night", action="store_true", help="Night mode")
     parser.add_argument("--time", type=str, help="Custom time (YYYY-MM-DD HH:MM)")
     parser.add_argument("--both", action="store_true", help="Generate both day and night")
+    parser.add_argument("--scale", type=int, default=1, help="Percent of data (1, 10, 50, 100)")
     parser.add_argument("--name", type=str, help="Custom screenshot filename (without .png)")
     args = parser.parse_args()
 
+    suffix = f"_{args.scale}pct" if args.scale > 1 else ""
+
     if args.both:
-        run_prototype(argparse.Namespace(night=False, time=None))
-        take_screenshot("day")
-        run_prototype(argparse.Namespace(night=True, time=None))
-        take_screenshot("night")
+        run_prototype(night=False, scale=args.scale)
+        take_screenshot(f"day{suffix}")
+        run_prototype(night=True, scale=args.scale)
+        take_screenshot(f"night{suffix}")
     else:
-        run_prototype(args)
+        run_prototype(night=args.night, time=args.time, scale=args.scale)
         mode = "night" if args.night else "day"
-        name = args.name if args.name else mode
+        name = args.name if args.name else f"{mode}{suffix}"
         take_screenshot(name)
 
 

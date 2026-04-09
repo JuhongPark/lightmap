@@ -2,6 +2,7 @@ import csv
 import json
 import os
 import sys
+import zipfile
 
 import httpx
 
@@ -33,6 +34,15 @@ BOSTON_STREETLIGHTS_PATH = os.path.join(
 BOSTON_FOOD_ID = "f1e13724-284d-478c-b8bc-ef042aa5b70b"
 BOSTON_FOOD_PATH = os.path.join(
     DATA_DIR, "safety", "food_establishments.csv"
+)
+
+BOSTON_BUILDINGS_URL = (
+    "https://data.boston.gov/dataset/08fd5249-2d75-42ef-ac23-951f3e0ec259"
+    "/resource/57026638-b4e8-4dfa-8644-0e2cfe925a46"
+    "/download/boston_buildings_with_roof_breaks_geojson.zip"
+)
+BOSTON_BUILDINGS_PATH = os.path.join(
+    DATA_DIR, "buildings", "boston_buildings.geojson"
 )
 
 
@@ -121,6 +131,34 @@ def download_ckan(resource_id, dest, columns, description):
     return True
 
 
+def download_boston_buildings():
+    print("Boston buildings (GeoJSON ZIP):")
+    if os.path.exists(BOSTON_BUILDINGS_PATH):
+        size_mb = os.path.getsize(BOSTON_BUILDINGS_PATH) / (1024 * 1024)
+        print(f"  [skip] Boston buildings already exists ({size_mb:.1f} MB)")
+        return True
+
+    zip_path = BOSTON_BUILDINGS_PATH + ".zip"
+    ok = download_file(BOSTON_BUILDINGS_URL, zip_path, "Boston buildings ZIP")
+    if not ok:
+        return False
+
+    print("  Extracting ZIP...")
+    os.makedirs(os.path.dirname(BOSTON_BUILDINGS_PATH), exist_ok=True)
+    with zipfile.ZipFile(zip_path) as zf:
+        geojson_names = [n for n in zf.namelist() if n.endswith(".geojson")]
+        if not geojson_names:
+            print("  ERROR: no .geojson file found in ZIP")
+            return False
+        with zf.open(geojson_names[0]) as src, open(BOSTON_BUILDINGS_PATH, "wb") as dst:
+            dst.write(src.read())
+
+    os.remove(zip_path)
+    size_mb = os.path.getsize(BOSTON_BUILDINGS_PATH) / (1024 * 1024)
+    print(f"  Extracted: {size_mb:.1f} MB")
+    return True
+
+
 def download_cambridge_buildings():
     print("Cambridge buildings (GeoJSON):")
     return download_file(
@@ -162,6 +200,7 @@ def download_boston_food():
 def main():
     print("=== LightMap Data Download ===\n")
     results = [
+        download_boston_buildings(),
         download_cambridge_buildings(),
         download_cambridge_streetlights(),
         download_boston_streetlights(),
