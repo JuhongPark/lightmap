@@ -17,7 +17,7 @@
             <meta name="viewport" content="width=device-width,
                 initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
             <style>
-                #map_113f9c18228d3f5e59fae7423303b34c {
+                #map_5bf75d8cd435b434b2dd87cb091eec3e {
                     position: relative;
                     width: 100.0%;
                     height: 100.0%;
@@ -56,19 +56,19 @@
     
     <div style="position:fixed; top:10px; left:60px; z-index:1000; background:rgba(15,23,42,0.9); color:#e2e8f0; padding:12px 16px; border-radius:8px; font-family:sans-serif; font-size:13px;"><b>LightMap Prototype - Night</b><br>Time: 2026-07-15 22:00 EDT<br>Sun altitude: -15.1&deg;<br>Streetlights: 2 | Food: 1</div>
     
-            <div class="folium-map" id="map_113f9c18228d3f5e59fae7423303b34c" ></div>
+            <div class="folium-map" id="map_5bf75d8cd435b434b2dd87cb091eec3e" ></div>
         
 </body>
 <script>
     
     
-            var map_113f9c18228d3f5e59fae7423303b34c = L.map(
-                "map_113f9c18228d3f5e59fae7423303b34c",
+            var map_5bf75d8cd435b434b2dd87cb091eec3e = L.map(
+                "map_5bf75d8cd435b434b2dd87cb091eec3e",
                 {
-                    center: [42.355, -71.065],
+                    center: [42.38, -71.1],
                     crs: L.CRS.EPSG3857,
                     ...{
-  "zoom": 13,
+  "zoom": 12,
   "zoomControl": true,
   "preferCanvas": false,
 }
@@ -80,7 +80,7 @@
 
         
     
-            var tile_layer_0ae803a68fa69def702dd3d1de010a5f = L.tileLayer(
+            var tile_layer_61c811df458f9578c15de1aa5cb67941 = L.tileLayer(
                 "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
                 {
   "minZoom": 0,
@@ -97,10 +97,10 @@
             );
         
     
-            tile_layer_0ae803a68fa69def702dd3d1de010a5f.addTo(map_113f9c18228d3f5e59fae7423303b34c);
+            tile_layer_61c811df458f9578c15de1aa5cb67941.addTo(map_5bf75d8cd435b434b2dd87cb091eec3e);
         
     
-            var heat_map_166f30bd916f955af2e987e057d17026 = L.heatLayer(
+            var heat_map_b46750287de45fd3a71fd30633e73ca2 = L.heatLayer(
                 [[42.3531592506, -71.0760443808], [42.399610761400275, -71.13874888584428]],
                 {
   "minOpacity": 0.5,
@@ -118,59 +118,59 @@
             );
         
     
-            heat_map_166f30bd916f955af2e987e057d17026.addTo(map_113f9c18228d3f5e59fae7423303b34c);
+            heat_map_b46750287de45fd3a71fd30633e73ca2.addTo(map_5bf75d8cd435b434b2dd87cb091eec3e);
         
     
-            var feature_group_1cca05f18e5c3d52de47c9a321cfc662 = L.featureGroup(
+            var feature_group_b4ad997a3af1225cfefcea60e3a26e29 = L.featureGroup(
                 {
 }
             );
         
     
-            var circle_marker_df1dc697958900a088c46bfb543a241a = L.circleMarker(
+            var circle_marker_3d5cc9019245d1299e565de2646bfbee = L.circleMarker(
                 [42.354770000088834, -71.0561300019333],
                 {"bubblingMouseEvents": true, "color": "#fbbf24", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "#fbbf24", "fillOpacity": 0.8, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 3}
-            ).addTo(feature_group_1cca05f18e5c3d52de47c9a321cfc662);
+            ).addTo(feature_group_b4ad997a3af1225cfefcea60e3a26e29);
         
     
-        var popup_cfa5912ebb009ddd8af7fb4197a5fbd6 = L.popup({
+        var popup_51dfc3c3d393c1272fe0c4b90ef916d1 = L.popup({
   "maxWidth": "100%",
 });
 
         
             
-                var html_0b78bb9ef2c92cd1058ca14b6b4dd3c6 = $(`<div id="html_0b78bb9ef2c92cd1058ca14b6b4dd3c6" style="width: 100.0%; height: 100.0%;">100 Federal Market & Barista- 10th Floor</div>`)[0];
-                popup_cfa5912ebb009ddd8af7fb4197a5fbd6.setContent(html_0b78bb9ef2c92cd1058ca14b6b4dd3c6);
+                var html_56c2ea1dee92367cb79f35bd9b4346fb = $(`<div id="html_56c2ea1dee92367cb79f35bd9b4346fb" style="width: 100.0%; height: 100.0%;">100 Federal Market & Barista- 10th Floor</div>`)[0];
+                popup_51dfc3c3d393c1272fe0c4b90ef916d1.setContent(html_56c2ea1dee92367cb79f35bd9b4346fb);
             
         
 
-        circle_marker_df1dc697958900a088c46bfb543a241a.bindPopup(popup_cfa5912ebb009ddd8af7fb4197a5fbd6)
+        circle_marker_3d5cc9019245d1299e565de2646bfbee.bindPopup(popup_51dfc3c3d393c1272fe0c4b90ef916d1)
         ;
 
         
     
     
-            feature_group_1cca05f18e5c3d52de47c9a321cfc662.addTo(map_113f9c18228d3f5e59fae7423303b34c);
+            feature_group_b4ad997a3af1225cfefcea60e3a26e29.addTo(map_5bf75d8cd435b434b2dd87cb091eec3e);
         
     
-            var layer_control_a98dd55c163b2ae05facbef61043cfba_layers = {
+            var layer_control_8c9d59c39e9a9074c028bc8668be6a3e_layers = {
                 base_layers : {
-                    "cartodbdarkmatter" : tile_layer_0ae803a68fa69def702dd3d1de010a5f,
+                    "cartodbdarkmatter" : tile_layer_61c811df458f9578c15de1aa5cb67941,
                 },
                 overlays :  {
-                    "Streetlights" : heat_map_166f30bd916f955af2e987e057d17026,
-                    "Food Establishments" : feature_group_1cca05f18e5c3d52de47c9a321cfc662,
+                    "Streetlights" : heat_map_b46750287de45fd3a71fd30633e73ca2,
+                    "Food Establishments" : feature_group_b4ad997a3af1225cfefcea60e3a26e29,
                 },
             };
-            let layer_control_a98dd55c163b2ae05facbef61043cfba = L.control.layers(
-                layer_control_a98dd55c163b2ae05facbef61043cfba_layers.base_layers,
-                layer_control_a98dd55c163b2ae05facbef61043cfba_layers.overlays,
+            let layer_control_8c9d59c39e9a9074c028bc8668be6a3e = L.control.layers(
+                layer_control_8c9d59c39e9a9074c028bc8668be6a3e_layers.base_layers,
+                layer_control_8c9d59c39e9a9074c028bc8668be6a3e_layers.overlays,
                 {
   "position": "topright",
   "collapsed": true,
   "autoZIndex": true,
 }
-            ).addTo(map_113f9c18228d3f5e59fae7423303b34c);
+            ).addTo(map_5bf75d8cd435b434b2dd87cb091eec3e);
 
         
 </script>

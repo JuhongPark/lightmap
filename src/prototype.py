@@ -187,8 +187,8 @@ def build_day_map(target_time, altitude, azimuth):
 
 def build_night_map(target_time, altitude, azimuth):
     m = folium.Map(
-        location=BOSTON_CENTER,
-        zoom_start=13,
+        location=[42.38, -71.10],
+        zoom_start=12,
         tiles="CartoDB dark_matter",
     )
 
