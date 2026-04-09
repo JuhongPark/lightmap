@@ -21,7 +21,7 @@ The features below are planned but not yet implemented.
 
 ### Daytime Shadow Map
 
-Calculate shadow positions from sun angle and building heights using pvlib and Shapely. The dataset covers 122K buildings and 138K tree canopy polygons. Shadows will be projected as 2D polygons on the map surface, updating as the user moves through time.
+Calculate shadow positions from sun angle and building heights using pvlib and Shapely. The dataset covers 123K buildings with height data (105K Boston + 18K Cambridge) and 144K tree canopy polygons. Of these, 46K buildings have geometry usable for shadow projection. Shadows will be projected as 2D polygons on the map surface, updating as the user moves through time.
 
 ### Nighttime Brightness Map
 
@@ -73,16 +73,16 @@ The `data/` directory will contain GeoJSON, CSV, and JSON files. These files are
 
 | Dataset | Records | Source |
 | --- | --- | --- |
-| Buildings | 122K | BPDA + Cambridge GIS |
+| Buildings | 123K (with height) | BPDA + Cambridge GIS |
 | Streetlights | 80K | data.boston.gov + Cambridge GIS |
-| Tree canopy | 138K | Boston + Cambridge GIS |
+| Tree canopy | 144K | Boston + Cambridge GIS |
 | Stores | 3K | data.boston.gov |
 
 ## Risks
 
 | Risk | Problem | Mitigation |
 | --- | --- | --- |
-| Data freshness | Boston building heights from 2010, Cambridge from 2018. New buildings will be missing. | Show data year in the app. Users see what they are looking at. |
-| Computing speed | 122K buildings per time slot. Shadow projection is computationally expensive. | Server-side cache. Compute once per slot, then reuse instantly. |
+| Data freshness | Boston building heights from 2010, Cambridge from 2018. Tree canopy from 2019/2018. New construction and growth are not reflected. | Show data year in the app. Users see what they are looking at. |
+| Computing speed | 46K buildings with geometry per time slot. Shadow projection is computationally expensive. | Server-side cache. Compute once per slot, then reuse instantly. |
 
 All data sources, timestamps, and limitations will be displayed in the About panel so users can judge the reliability of what they see.

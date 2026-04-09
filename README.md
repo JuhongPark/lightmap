@@ -19,17 +19,18 @@ Built by **Juhong Park** (System Design and Management, MIT) as a term project f
 
 | Dataset | Records | Source |
 | --- | --- | --- |
-| Buildings | 122K | BPDA + Cambridge GIS |
+| Buildings | 123K (with height) | BPDA + Cambridge GIS |
 | Streetlights | 80K | data.boston.gov + Cambridge GIS |
-| Tree canopy | 138K | Boston + Cambridge GIS |
+| Tree canopy | 144K | Boston + Cambridge GIS |
 
-See [docs/project.md](docs/project.md) for the full data catalog.
+See [docs/data-catalog.md](docs/data-catalog.md) for the full data catalog.
 
 ## Documentation
 
 Documentation is being added. This section will be updated as new documents are created.
 
 - [Project Description](docs/project.md) -- Problem, solution plan, architecture, data sources.
+- [Data Catalog](docs/data-catalog.md) -- All datasets, APIs, and validation results.
 - [Course Information](docs/course.md) -- MIT 1.001 course details and grading rubric.
 
 ## License
