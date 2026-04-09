@@ -98,21 +98,15 @@ CLI: add `--night` flag (forces 2026-07-15 22:00)
 
 ## 3. Scale Up (5 stages)
 
-Each stage applies to both day (buildings/shadows) and night (streetlights/food).
-Boston and Cambridge each scale independently.
+See [Scale-Up Plan](scaleup-plan.md) for full details.
 
-| Stage | Buildings (Cambridge 18K) | Buildings (Boston) | Streetlights (Cambridge 6K) | Streetlights (Boston 74K) | Food (3.2K) |
-|-------|--------------------------|--------------------|-----------------------------|--------------------------|-------------|
-| ~~1 each~~ (done) | 1 | 1 (hardcoded) | 1 | 1 | 1 |
-| 1% | ~180 | needs download | ~60 | ~740 | ~32 |
-| 10% | ~1.8K | needs download | ~600 | ~7.4K | ~320 |
-| 50% | ~9K | needs download | ~3K | ~37K | ~1.6K |
-| 100% | 18K | needs download (106MB) | 6K | 74K | 3.2K |
-
-Notes:
-- Boston buildings require separate GeoJSON download (106MB) starting from 1% stage
-- Each stage: run, check rendering speed, check visual correctness
-- If a stage is too slow or renders incorrectly, fix before moving to next
+| Stage | Status |
+|-------|--------|
+| 1 each | done |
+| 1% | pending |
+| 10% | pending |
+| 50% | pending |
+| 100% | pending |
 
 ### Next steps (later)
 - Safety incident data overlay (crime heatmap)
