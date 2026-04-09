@@ -1,0 +1,7 @@
+pvlib>=0.15
+shapely>=2.1
+pandas>=3.0
+numpy>=2.4
+httpx>=0.28
+folium>=0.20
+tzdata>=2024.1
