@@ -2,10 +2,13 @@
 
 ## Rough Roadmap (for reference only)
 
-1. ~~Shadow engine prototype~~ (done)
-2. **Nighttime brightness map** (current)
-3. Safety incident data overlay
-4. Optimization and extensions
+1. ~~1 each: Shadow + Night validation~~ (done)
+2. 1%: ~280 buildings, ~800 streetlights
+3. 10%: ~2.8K buildings, ~8K streetlights
+4. 50%: ~14K buildings, ~40K streetlights
+5. 100%: ~28K buildings, ~80K streetlights (+ Boston buildings download)
+6. Safety incident data overlay (later)
+7. Optimization and extensions (later)
 
 ---
 
@@ -93,10 +96,25 @@ CLI: add `--night` flag (forces 2026-07-15 22:00)
 
 ---
 
-## Next Steps (after nighttime map is validated)
+## 3. Scale Up (5 stages)
 
-- Expand download_data.py: Boston buildings (106MB), crime, canopy
-- Merge Boston + Cambridge buildings -> all_buildings.geojson (46K)
+Each stage applies to both day (buildings/shadows) and night (streetlights/food).
+Boston and Cambridge each scale independently.
+
+| Stage | Buildings (Cambridge 18K) | Buildings (Boston) | Streetlights (Cambridge 6K) | Streetlights (Boston 74K) | Food (3.2K) |
+|-------|--------------------------|--------------------|-----------------------------|--------------------------|-------------|
+| ~~1 each~~ (done) | 1 | 1 (hardcoded) | 1 | 1 | 1 |
+| 1% | ~180 | needs download | ~60 | ~740 | ~32 |
+| 10% | ~1.8K | needs download | ~600 | ~7.4K | ~320 |
+| 50% | ~9K | needs download | ~3K | ~37K | ~1.6K |
+| 100% | 18K | needs download (106MB) | 6K | 74K | 3.2K |
+
+Notes:
+- Boston buildings require separate GeoJSON download (106MB) starting from 1% stage
+- Each stage: run, check rendering speed, check visual correctness
+- If a stage is too slow or renders incorrectly, fix before moving to next
+
+### Next steps (later)
 - Safety incident data overlay (crime heatmap)
 - Interactive app: FastAPI backend + MapLibre frontend
 
