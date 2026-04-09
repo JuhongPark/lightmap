@@ -10,7 +10,21 @@ Built by **Juhong Park** (System Design and Management, MIT) as a term project f
 
 | Day (Shadow Map) | Night (Brightness Map) |
 | --- | --- |
-| ![Day mode](docs/screenshots/day.png) | ![Night mode](docs/screenshots/night.png) |
+| <img src="docs/screenshots/day.png" width="400"> | <img src="docs/screenshots/night.png" width="400"> |
+
+123K buildings with shadows across Boston and Cambridge (day). 80K streetlights as a brightness heatmap with 3K food establishment markers (night).
+
+### How It Works
+
+The shadow engine computes sun position (pvlib) and projects each building footprint along the opposite azimuth. The brightness map renders streetlight density as a heatmap. Both scale from a single building to the full dataset:
+
+| Scale | Day (Shadow Map) | Night (Brightness Map) |
+| --- | --- | --- |
+| 1 each | <img src="docs/screenshots/day_1each.png" width="360"> | <img src="docs/screenshots/night_1each.png" width="360"> |
+| 1% | <img src="docs/screenshots/day_1pct.png" width="360"> | <img src="docs/screenshots/night_1pct.png" width="360"> |
+| 10% | <img src="docs/screenshots/day_10pct.png" width="360"> | <img src="docs/screenshots/night_10pct.png" width="360"> |
+| 50% | <img src="docs/screenshots/day_50pct.png" width="360"> | <img src="docs/screenshots/night_50pct.png" width="360"> |
+| 100% | <img src="docs/screenshots/day_100pct.png" width="360"> | <img src="docs/screenshots/night_100pct.png" width="360"> |
 
 ## Tech Stack
 

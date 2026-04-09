@@ -27,9 +27,33 @@ TOTAL_FOOD = 3207
 
 
 def _sample_count(total, scale_pct):
+    if scale_pct == 0:
+        return 1
     if scale_pct >= 100:
         return total
     return max(1, int(total * scale_pct / 100))
+
+
+def _pick_tallest_near_center(valid_features, center_lat=42.36, center_lon=-71.08):
+    from shapely.geometry import shape
+    best = None
+    best_score = -1
+    for feat in valid_features:
+        h = feat["properties"].get("BLDG_HGT_2010", 0)
+        try:
+            geom = shape(feat["geometry"])
+            c = geom.centroid
+            dist = abs(c.y - center_lat) + abs(c.x - center_lon)
+            if dist > 0.05:
+                continue
+            area = geom.area
+            score = h * (area ** 0.5)
+            if score > best_score:
+                best_score = score
+                best = feat
+        except Exception:
+            continue
+    return best
 
 
 def load_buildings(scale_pct):
@@ -51,8 +75,11 @@ def load_buildings(scale_pct):
                     "geometry": feat["geometry"],
                 }
                 valid.append(new_feat)
-        n = _sample_count(len(valid), scale_pct)
-        sampled = random.sample(valid, min(n, len(valid)))
+        if scale_pct == 0:
+            sampled = [_pick_tallest_near_center(valid)]
+        else:
+            n = _sample_count(len(valid), scale_pct)
+            sampled = random.sample(valid, min(n, len(valid)))
         features.extend(sampled)
         print(f"  Cambridge buildings: {len(sampled)}/{len(valid)}")
 
@@ -66,8 +93,11 @@ def load_buildings(scale_pct):
             h = props.get("BLDG_HGT_2010")
             if h is not None and h > 0:
                 valid.append(feat)
-        n = _sample_count(len(valid), scale_pct)
-        sampled = random.sample(valid, min(n, len(valid)))
+        if scale_pct == 0:
+            sampled = [_pick_tallest_near_center(valid)]
+        else:
+            n = _sample_count(len(valid), scale_pct)
+            sampled = random.sample(valid, min(n, len(valid)))
         features.extend(sampled)
         print(f"  Boston buildings: {len(sampled)}/{len(valid)}")
     else:
@@ -165,7 +195,13 @@ def build_day_map(target_time, altitude, azimuth, scale_pct):
     shadows, _, _ = compute_all_shadows(tmp_path, target_time)
     print(f"  Shadows computed: {len(shadows)}")
 
-    m = folium.Map(location=MAP_CENTER, zoom_start=14, tiles="CartoDB positron")
+    m = folium.Map(
+        location=MAP_CENTER, zoom_start=14, tiles="CartoDB positron",
+        width="100%", height="100%",
+    )
+    m.get_root().html.add_child(folium.Element(
+        "<style>html,body{margin:0;padding:0;height:100%;width:100%}</style>"
+    ))
 
     folium.GeoJson(
         building_data,
@@ -205,7 +241,13 @@ def build_day_map(target_time, altitude, azimuth, scale_pct):
 
 
 def build_night_map(target_time, altitude, azimuth, scale_pct):
-    m = folium.Map(location=MAP_CENTER, zoom_start=14, tiles="CartoDB dark_matter")
+    m = folium.Map(
+        location=MAP_CENTER, zoom_start=14, tiles="CartoDB dark_matter",
+        width="100%", height="100%",
+    )
+    m.get_root().html.add_child(folium.Element(
+        "<style>html,body{margin:0;padding:0;height:100%;width:100%}</style>"
+    ))
 
     print("Loading streetlights...")
     coords = load_streetlights(scale_pct)
@@ -283,25 +325,25 @@ def main():
     parser.add_argument(
         "--time",
         type=str,
-        default="2026-07-15 14:00",
+        default="2025-07-15 14:00",
         help="Target time (YYYY-MM-DD HH:MM)",
     )
     parser.add_argument(
         "--night",
         action="store_true",
-        help="Force night mode (2026-07-15 22:00)",
+        help="Force night mode (2025-07-15 22:00)",
     )
     parser.add_argument(
         "--scale",
         type=int,
         default=1,
-        choices=[1, 10, 50, 100],
-        help="Percent of data to use (1, 10, 50, 100)",
+        choices=[0, 1, 10, 50, 100],
+        help="Percent of data to use (0=1 each, 1, 10, 50, 100)",
     )
     args = parser.parse_args()
 
     if args.night:
-        target_time = datetime(2026, 7, 15, 22, 0, tzinfo=BOSTON_TZ)
+        target_time = datetime(2025, 7, 15, 22, 0, tzinfo=BOSTON_TZ)
     else:
         target_time = datetime.strptime(args.time, "%Y-%m-%d %H:%M")
         target_time = target_time.replace(tzinfo=BOSTON_TZ)
