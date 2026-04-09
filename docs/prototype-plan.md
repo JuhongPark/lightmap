@@ -1,126 +1,103 @@
 # LightMap Prototype Implementation Plan
 
-## 1. Context
+## Rough Roadmap (for reference only)
 
-The prototype validates the shadow computation engine.
-Generate `docs/prototype.html` and check: shadow direction, length, building connectivity.
-
----
-
-## 2. Files to Create
-
-```
-lightmap/
-  requirements.txt
-  src/
-    __init__.py
-    shadow/
-      __init__.py
-      compute.py          # Shadow engine (~120 lines)
-    prototype.py          # folium HTML generator (~80 lines)
-  scripts/
-    download_data.py      # Building data download
-```
-
-Generated output (gitignored):
-```
-  data/
-    cambridge/
-      buildings/buildings.geojson   # Cambridge 18K buildings
-  docs/
-    prototype.html
-```
+1. ~~Shadow engine prototype~~ (done)
+2. **Nighttime brightness map** (current)
+3. Safety incident data overlay
+4. Optimization and extensions
 
 ---
 
-## 3. Implementation Steps
+## 1. Shadow Engine Prototype (done)
 
-### Step 1: Scaffolding
+Shadow direction, length, building connectivity validated.
 
-- Create `src/shadow/`, `scripts/`, empty `__init__.py` files
-- Write `requirements.txt`: pvlib, shapely, pandas, numpy, httpx, folium
-- Add `data/`, `docs/prototype.html` to `.gitignore`
-- Create venv and install
+Files created:
+- `src/shadow/compute.py` — get_sun_position, compute_shadow, compute_all_shadows
+- `src/prototype.py` — folium HTML generator (day mode)
+- `scripts/download_data.py` — Cambridge buildings download
+- `requirements.txt` — pvlib, shapely, pandas, numpy, httpx, folium, tzdata
 
-### Step 2: Shadow Engine (src/shadow/compute.py)
+Validation results:
+- July 15 2pm: altitude=64.5, azimuth=220.3, shadow ~4.8m (correct)
+- Jan 15 2pm: altitude=20.3, azimuth=211.4, shadow longer (correct)
+- 2 buildings (Cambridge real + Boston hardcoded) both render correctly
 
-#### get_sun_position(dt, lat=42.36, lon=-71.06)
+---
 
-- pvlib.solarposition.get_solarposition with pd.DatetimeIndex
-- If dt is naive, assume US/Eastern
-- Return (apparent_elevation, azimuth)
+## 2. Nighttime Brightness Map
 
-#### compute_shadow(building_polygon, height_ft, sun_altitude, sun_azimuth)
+### Goal
 
-1. If sun_altitude <= 0: return None
-2. shadow_length_m = (height_ft * 0.3048) / tan(radians(sun_altitude)), cap 500m
-3. shadow_direction = radians(sun_azimuth + 180)
-4. dx_m = length * sin(direction), dy_m = length * cos(direction)
-5. Convert to degrees (m_per_deg_lat=111320, m_per_deg_lon=111320*cos(rad(42.36)))
-6. Translate polygon by (dx_deg, dy_deg) via shapely.affinity.translate
-7. unary_union([building, translated]).convex_hull
-8. Fix invalid with buffer(0)
+Add night mode to prototype. When sun is below horizon, render streetlight heatmap + food establishment markers instead of shadows.
 
-#### compute_all_shadows(geojson_path, dt)
+Validate: heatmap shows bright clusters along major streets. Food markers visible.
 
-- Cache parsed buildings by path
-- Filter height > 0, handle Polygon/MultiPolygon/GeometryCollection
-- Return (shadow_features_list, altitude, azimuth)
+### Data to Download
 
-### Step 3: Download Data (scripts/download_data.py)
+| Dataset | Method | Source | Records | Output |
+|---------|--------|--------|---------|--------|
+| Boston Streetlights | CKAN API | resource_id: `c2fcc1e3-c38f-44ad-a0cf-e5ea2a6585b5` | 74K | `data/streetlights/streetlights.csv` |
+| Cambridge Streetlights | GitHub raw | `cambridgegis_data_infra/.../INFRA_StreetLights.geojson` | 6K | `data/cambridge/streetlights/streetlights.geojson` |
+| Food Establishments | CKAN API | resource_id: `f1e13724-284d-478c-b8bc-ef042aa5b70b` | 3.2K | `data/safety/food_establishments.csv` |
 
-Download Cambridge buildings GeoJSON (19MB):
+CKAN base URL: `https://data.boston.gov/api/3/action/datastore_search?resource_id={id}&limit=32000`
+
+Cambridge streetlights URL:
 ```
-https://raw.githubusercontent.com/cambridgegis/cambridgegis_data/main/Basemap/Buildings/BASEMAP_Buildings.geojson
+https://raw.githubusercontent.com/cambridgegis/cambridgegis_data_infra/main/Street_Lights/INFRA_StreetLights.geojson
 ```
-Save to `data/cambridge/buildings/buildings.geojson`.
 
-- Skip if file already exists
-- Print download progress and file size
-- Height field: `TOP_GL` (meters)
+### Implementation Steps
 
-### Step 4: Prototype Script (src/prototype.py)
+#### Step 1: Expand download_data.py
 
-1. Load Cambridge buildings GeoJSON, pick 1 building with TOP_GL > 0
-2. Load 1 Boston building as hardcoded test polygon (known height, e.g. Prudential Tower)
-3. Convert height to feet for compute_shadow
-4. Compute shadows for both buildings
-5. Render with folium: buildings (#64748b) + shadows (#1e293b), CartoDB positron
-6. Add info overlay (time, sun altitude/azimuth)
-7. Save to docs/prototype.html
+Add download functions for:
+- Boston streetlights (CKAN API, columns: Lat, Long)
+- Cambridge streetlights (GitHub raw GeoJSON)
+- Boston food establishments (CKAN API, columns: latitude, longitude, businessname)
 
-CLI: `--time "YYYY-MM-DD HH:MM"` (default: 2026-07-15 14:00 US/Eastern)
+CKAN returns JSON with `result.records` array. Extract relevant columns, write as CSV.
 
-### Step 5: Validate
+#### Step 2: Update prototype.py
+
+Add night mode:
+1. Check `is_day = altitude > 0`
+2. If night: switch to CartoDB dark_matter tiles
+3. Load streetlights (1 per city for prototype):
+   - Boston CSV (Lat, Long columns) -> 1 point
+   - Cambridge GeoJSON (extract coordinates from Point features) -> 1 point
+4. Add as `folium.plugins.HeatMap` (radius=12, blur=20)
+   - Gradient: 0.2=#1e3a5f, 0.4=#2563eb, 0.6=#60a5fa, 0.8=#fbbf24, 1.0=#ffffff
+5. Load food establishments (1 for prototype)
+6. Add as `folium.CircleMarker` (radius=3, color=#fbbf24)
+7. Add LayerControl
+
+CLI: add `--night` flag (forces 2026-07-15 22:00)
+
+#### Step 3: Validate
 
 | Check | Expected |
 |-------|----------|
-| Shadow direction (July 2pm) | Northeast of buildings (sun azimuth ~230) |
-| Shadow direction (Jan 2pm) | North-northeast (sun azimuth ~195) |
-| Shadow length (10m building, July) | ~4.8m |
-| Shadow length (10m building, Jan) | ~27m |
-| Shadow shape | Connected to building, no gaps |
-| Different times | Shadows change when --time changes |
-| Two buildings | Cambridge (real data) + Boston (hardcoded) both render correctly |
+| Heatmap renders | Visible around sample points |
+| Food markers | Yellow dot at business location |
+| Streetlight count | 2 (1 Boston + 1 Cambridge) |
+| Day/night switch | --night shows heatmap, default shows shadows |
 
----
-
-## 4. Risks
+### Risks
 
 | Risk | Mitigation |
 |------|------------|
-| Cambridge TOP_GL has nulls/zeros | Filter TOP_GL > 0 |
-| convex_hull oversimplifies L-shaped buildings | Acceptable for prototype |
+| CKAN API limits per-request | Start with limit=32000. Streetlights (74K) may need 3 pages. |
 
 ---
 
-## Next Steps (after prototype is validated)
+## Next Steps (after nighttime map is validated)
 
-- Expand download_data.py: Boston buildings (106MB), streetlights, crime, food, canopy
+- Expand download_data.py: Boston buildings (106MB), crime, canopy
 - Merge Boston + Cambridge buildings -> all_buildings.geojson (46K)
-- CKAN API pagination for large Boston datasets (258K crime records)
-- Boston buildings GeoJSON direct download URL (needs discovery from dataset page)
-- Night mode: streetlight heatmap + food establishment markers
+- Safety incident data overlay (crime heatmap)
 - Interactive app: FastAPI backend + MapLibre frontend
 
 ## URL Corrections (for future reference)
@@ -131,10 +108,3 @@ CLI: `--time "YYYY-MM-DD HH:MM"` (default: 2026-07-15 14:00 US/Eastern)
 | Cambridge Streetlights | `https://raw.githubusercontent.com/cambridgegis/cambridgegis_data_infra/main/Street_Lights/INFRA_StreetLights.geojson` |
 | Cambridge Tree Canopy | `https://raw.githubusercontent.com/cambridgegis/cambridgegis_data_environmental/main/Tree_Canopy_2018/ENVIRONMENTAL_TreeCanopy2018.topojson` |
 | Cambridge Crime | Socrata ID: `xuad-73uj` |
-
-## Rough Roadmap (for reference only)
-
-1. Shadow engine prototype (this document)
-2. Nighttime brightness map
-3. Safety incident data overlay
-4. Optimization and extensions

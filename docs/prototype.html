@@ -17,7 +17,7 @@
             <meta name="viewport" content="width=device-width,
                 initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
             <style>
-                #map_7fdac23e1a0370d04c2109846efc8027 {
+                #map_113f9c18228d3f5e59fae7423303b34c {
                     position: relative;
                     width: 100.0%;
                     height: 100.0%;
@@ -50,24 +50,25 @@
             </script>
 
         
+    <script src="https://cdn.jsdelivr.net/gh/python-visualization/folium@main/folium/templates/leaflet_heat.min.js"></script>
 </head>
 <body>
     
-    <div style="position:fixed; top:10px; left:60px; z-index:1000; background:rgba(255,255,255,0.9); padding:12px 16px; border-radius:8px; font-family:sans-serif; font-size:13px;"><b>LightMap Prototype</b><br>Time: 2026-01-15 14:00 EST<br>Sun altitude: 20.3&deg;<br>Sun azimuth: 211.4&deg;<br>Buildings: 2<br>Shadows: 2</div>
+    <div style="position:fixed; top:10px; left:60px; z-index:1000; background:rgba(15,23,42,0.9); color:#e2e8f0; padding:12px 16px; border-radius:8px; font-family:sans-serif; font-size:13px;"><b>LightMap Prototype - Night</b><br>Time: 2026-07-15 22:00 EDT<br>Sun altitude: -15.1&deg;<br>Streetlights: 2 | Food: 1</div>
     
-            <div class="folium-map" id="map_7fdac23e1a0370d04c2109846efc8027" ></div>
+            <div class="folium-map" id="map_113f9c18228d3f5e59fae7423303b34c" ></div>
         
 </body>
 <script>
     
     
-            var map_7fdac23e1a0370d04c2109846efc8027 = L.map(
-                "map_7fdac23e1a0370d04c2109846efc8027",
+            var map_113f9c18228d3f5e59fae7423303b34c = L.map(
+                "map_113f9c18228d3f5e59fae7423303b34c",
                 {
                     center: [42.355, -71.065],
                     crs: L.CRS.EPSG3857,
                     ...{
-  "zoom": 14,
+  "zoom": 13,
   "zoomControl": true,
   "preferCanvas": false,
 }
@@ -79,8 +80,8 @@
 
         
     
-            var tile_layer_9254df682cd22a0678924f91fdd3b9ef = L.tileLayer(
-                "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+            var tile_layer_0ae803a68fa69def702dd3d1de010a5f = L.tileLayer(
+                "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
                 {
   "minZoom": 0,
   "maxZoom": 20,
@@ -96,89 +97,80 @@
             );
         
     
-            tile_layer_9254df682cd22a0678924f91fdd3b9ef.addTo(map_7fdac23e1a0370d04c2109846efc8027);
+            tile_layer_0ae803a68fa69def702dd3d1de010a5f.addTo(map_113f9c18228d3f5e59fae7423303b34c);
         
     
-        function geo_json_a6e1b5b9c52ba0b1fa90859b1c15bff6_styler(feature) {
-            switch(feature.id) {
-                default:
-                    return {"color": "#475569", "fillColor": "#64748b", "fillOpacity": 0.6, "weight": 1};
-            }
-        }
-
-        function geo_json_a6e1b5b9c52ba0b1fa90859b1c15bff6_onEachFeature(feature, layer) {
-
-            layer.on({
-            });
-        };
-        var geo_json_a6e1b5b9c52ba0b1fa90859b1c15bff6 = L.geoJson(null, {
-                onEachFeature: geo_json_a6e1b5b9c52ba0b1fa90859b1c15bff6_onEachFeature,
-            
-                style: geo_json_a6e1b5b9c52ba0b1fa90859b1c15bff6_styler,
-            ...{
+            var heat_map_166f30bd916f955af2e987e057d17026 = L.heatLayer(
+                [[42.3531592506, -71.0760443808], [42.399610761400275, -71.13874888584428]],
+                {
+  "minOpacity": 0.5,
+  "maxZoom": 18,
+  "radius": 12,
+  "blur": 20,
+  "gradient": {
+  0.2: "#1e3a5f",
+  0.4: "#2563eb",
+  0.6: "#60a5fa",
+  0.8: "#fbbf24",
+  1.0: "#ffffff",
+},
 }
-        });
-
-        function geo_json_a6e1b5b9c52ba0b1fa90859b1c15bff6_add (data) {
-            geo_json_a6e1b5b9c52ba0b1fa90859b1c15bff6
-                .addData(data);
-        }
-            geo_json_a6e1b5b9c52ba0b1fa90859b1c15bff6_add({"features": [{"geometry": {"coordinates": [[[-71.0818, 42.347], [-71.0812, 42.347], [-71.0812, 42.3475], [-71.0818, 42.3475], [-71.0818, 42.347]]], "type": "Polygon"}, "id": "0", "properties": {"BLDG_HGT_2010": 749.0}, "type": "Feature"}, {"geometry": {"coordinates": [[[-71.09409771554316, 42.373973775526686], [-71.09410147751588, 42.37398827169545], [-71.09403355139658, 42.37400041812717], [-71.09400735706944, 42.37392111945382], [-71.09402955127851, 42.37391690972187], [-71.09402679219832, 42.373896177210135], [-71.09403848164943, 42.37387489879952], [-71.09415685069926, 42.37365363823463], [-71.09424424908076, 42.37350033890331], [-71.09428765816655, 42.37349406127089], [-71.0943052245926, 42.373459822339704], [-71.09434285192427, 42.373453523395185], [-71.09435441854475, 42.373489227200906], [-71.09439261820597, 42.37349346090008], [-71.09450809818904, 42.37385431448949], [-71.09414425999255, 42.373912813959265], [-71.09415817629197, 42.3739634221967], [-71.09409771554316, 42.373973775526686]]], "type": "Polygon"}, "id": "1", "properties": {"BLDG_HGT_2010": 42.0}, "type": "Feature"}], "type": "FeatureCollection"});
-
+            );
         
     
-            geo_json_a6e1b5b9c52ba0b1fa90859b1c15bff6.addTo(map_7fdac23e1a0370d04c2109846efc8027);
+            heat_map_166f30bd916f955af2e987e057d17026.addTo(map_113f9c18228d3f5e59fae7423303b34c);
         
     
-        function geo_json_dc819ef88e834df1e77679594127f7f3_styler(feature) {
-            switch(feature.id) {
-                default:
-                    return {"color": "#1e293b", "fillColor": "#1e293b", "fillOpacity": 0.4, "weight": 0.5};
-            }
-        }
-
-        function geo_json_dc819ef88e834df1e77679594127f7f3_onEachFeature(feature, layer) {
-
-            layer.on({
-            });
-        };
-        var geo_json_dc819ef88e834df1e77679594127f7f3 = L.geoJson(null, {
-                onEachFeature: geo_json_dc819ef88e834df1e77679594127f7f3_onEachFeature,
-            
-                style: geo_json_dc819ef88e834df1e77679594127f7f3_styler,
-            ...{
+            var feature_group_1cca05f18e5c3d52de47c9a321cfc662 = L.featureGroup(
+                {
 }
-        });
+            );
+        
+    
+            var circle_marker_df1dc697958900a088c46bfb543a241a = L.circleMarker(
+                [42.354770000088834, -71.0561300019333],
+                {"bubblingMouseEvents": true, "color": "#fbbf24", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "#fbbf24", "fillOpacity": 0.8, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 3, "stroke": true, "weight": 3}
+            ).addTo(feature_group_1cca05f18e5c3d52de47c9a321cfc662);
+        
+    
+        var popup_cfa5912ebb009ddd8af7fb4197a5fbd6 = L.popup({
+  "maxWidth": "100%",
+});
 
-        function geo_json_dc819ef88e834df1e77679594127f7f3_add (data) {
-            geo_json_dc819ef88e834df1e77679594127f7f3
-                .addData(data);
-        }
-            geo_json_dc819ef88e834df1e77679594127f7f3_add({"features": [{"geometry": {"coordinates": [[[-71.0818, 42.347], [-71.0818, 42.3475], [-71.07863395348994, 42.35133418002794], [-71.07803395348994, 42.35133418002794], [-71.07803395348994, 42.350834180027945], [-71.0812, 42.347], [-71.0818, 42.347]]], "type": "Polygon"}, "id": "0", "properties": {"height_ft": 749.0, "shadow_len_m": 500, "type": "shadow"}, "type": "Feature"}, {"geometry": {"coordinates": [[[-71.09434285192427, 42.373453523395185], [-71.09439261820597, 42.37349346090008], [-71.09450809818904, 42.37385431448949], [-71.09428886385453, 42.37411981403416], [-71.09388224318137, 42.37425377124012], [-71.09381431706207, 42.374265917671835], [-71.09378812273494, 42.374186618998486], [-71.09393761636476, 42.373919137779296], [-71.09402501474625, 42.37376583844798], [-71.09424424908076, 42.37350033890331], [-71.0943052245926, 42.373459822339704], [-71.09434285192427, 42.373453523395185]]], "type": "Polygon"}, "id": "1", "properties": {"height_ft": 42.0, "shadow_len_m": 34.6, "type": "shadow"}, "type": "Feature"}], "type": "FeatureCollection"});
+        
+            
+                var html_0b78bb9ef2c92cd1058ca14b6b4dd3c6 = $(`<div id="html_0b78bb9ef2c92cd1058ca14b6b4dd3c6" style="width: 100.0%; height: 100.0%;">100 Federal Market & Barista- 10th Floor</div>`)[0];
+                popup_cfa5912ebb009ddd8af7fb4197a5fbd6.setContent(html_0b78bb9ef2c92cd1058ca14b6b4dd3c6);
+            
+        
+
+        circle_marker_df1dc697958900a088c46bfb543a241a.bindPopup(popup_cfa5912ebb009ddd8af7fb4197a5fbd6)
+        ;
 
         
     
-            geo_json_dc819ef88e834df1e77679594127f7f3.addTo(map_7fdac23e1a0370d04c2109846efc8027);
+    
+            feature_group_1cca05f18e5c3d52de47c9a321cfc662.addTo(map_113f9c18228d3f5e59fae7423303b34c);
         
     
-            var layer_control_731493093c13ec3d7bab03666d799392_layers = {
+            var layer_control_a98dd55c163b2ae05facbef61043cfba_layers = {
                 base_layers : {
-                    "cartodbpositron" : tile_layer_9254df682cd22a0678924f91fdd3b9ef,
+                    "cartodbdarkmatter" : tile_layer_0ae803a68fa69def702dd3d1de010a5f,
                 },
                 overlays :  {
-                    "Buildings" : geo_json_a6e1b5b9c52ba0b1fa90859b1c15bff6,
-                    "Shadows" : geo_json_dc819ef88e834df1e77679594127f7f3,
+                    "Streetlights" : heat_map_166f30bd916f955af2e987e057d17026,
+                    "Food Establishments" : feature_group_1cca05f18e5c3d52de47c9a321cfc662,
                 },
             };
-            let layer_control_731493093c13ec3d7bab03666d799392 = L.control.layers(
-                layer_control_731493093c13ec3d7bab03666d799392_layers.base_layers,
-                layer_control_731493093c13ec3d7bab03666d799392_layers.overlays,
+            let layer_control_a98dd55c163b2ae05facbef61043cfba = L.control.layers(
+                layer_control_a98dd55c163b2ae05facbef61043cfba_layers.base_layers,
+                layer_control_a98dd55c163b2ae05facbef61043cfba_layers.overlays,
                 {
   "position": "topright",
   "collapsed": true,
   "autoZIndex": true,
 }
-            ).addTo(map_7fdac23e1a0370d04c2109846efc8027);
+            ).addTo(map_113f9c18228d3f5e59fae7423303b34c);
 
         
 </script>
