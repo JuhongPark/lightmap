@@ -1,14 +1,13 @@
 # LightMap Prototype Implementation Plan
 
-## Rough Roadmap (for reference only)
+## Rough Roadmap
 
 1. ~~1 each: Shadow + Night validation~~ (done)
-2. 1%: ~280 buildings, ~800 streetlights
-3. 10%: ~2.8K buildings, ~8K streetlights
-4. 50%: ~14K buildings, ~40K streetlights
-5. 100%: ~28K buildings, ~80K streetlights (+ Boston buildings download)
-6. Safety incident data overlay (later)
-7. Optimization and extensions (later)
+2. ~~1% - 100% scale-up~~ (done)
+3. ~~Prototype enhancement: UI, dual map, time animation, tests~~ (done)
+4. Interactive app: FastAPI backend + MapLibre frontend
+5. Safety incident data overlay (crime heatmap)
+6. Presentation video
 
 ---
 
@@ -108,9 +107,39 @@ See [Scale-Up Plan](scaleup-plan.md) for full details.
 | 50% | done |
 | 100% | done |
 
-### Next steps (later)
-- Safety incident data overlay (crime heatmap)
-- Interactive app: FastAPI backend + MapLibre frontend
+## 4. Prototype Enhancement (done)
+
+Persona-based evaluation (professor, city planner, runner, casual resident) identified issues and drove improvements.
+
+Done:
+- Onboarding modal with localStorage persistence
+- Shadows colored by building height (LinearColormap)
+- Human-readable info panels (no technical jargon)
+- Dual map: day + night side-by-side (DualMap plugin)
+- Time animation: 6-step shadow playback (TimestampedGeoJson)
+- Shadow coverage statistics with fixed study area
+- Refactored shared helpers, eliminated code duplication (766 to 642 lines)
+- 14 unit tests for shadow engine
+- Data vintage shown in info panels
+- README tech stack corrected to match actual implementation
+
+## 5. Next Steps
+
+### Interactive app (FastAPI + MapLibre)
+- FastAPI backend with `/api/shadows?time=...` endpoint
+- MapLibre GL JS frontend replacing folium
+- Real-time time slider (user-controlled, not pre-baked)
+- Day/night auto-switch based on solar elevation
+- Click-to-inspect with richer panels
+- About panel with full data attribution
+
+### Additional data layers
+- Safety incident data overlay (Cambridge Socrata: `xuad-73uj`)
+- Tree canopy shade (144K polygons, Cambridge TopoJSON)
+
+### Presentation
+- Record demo video covering: dual map, time animation, click-to-inspect
+- Voiceover explaining shadow engine and data pipeline
 
 ## URL Corrections (for future reference)
 
