@@ -112,3 +112,50 @@ def compute_all_shadows(geojson_path, dt, height_field="BLDG_HGT_2010"):
         })
 
     return features, altitude, azimuth
+
+
+def compute_shadow_coverage(shadow_features):
+    if not shadow_features:
+        return 0.0
+
+    shadow_polys = []
+    for feat in shadow_features:
+        try:
+            geom = shape(feat["geometry"]).simplify(0.0001)
+            if not geom.is_empty:
+                shadow_polys.append(geom)
+        except Exception:
+            continue
+
+    if not shadow_polys:
+        return 0.0
+
+    shadow_union = unary_union(shadow_polys)
+
+    building_centroids = []
+    for feat in shadow_features:
+        try:
+            geom = shape(feat["geometry"])
+            c = geom.centroid
+            building_centroids.append((c.x, c.y))
+        except Exception:
+            continue
+
+    if not building_centroids:
+        return 0.0
+
+    xs = [p[0] for p in building_centroids]
+    ys = [p[1] for p in building_centroids]
+    margin = 0.005
+    bounds = Polygon([
+        (min(xs) - margin, min(ys) - margin),
+        (max(xs) - margin, max(ys) + margin),
+        (max(xs) + margin, max(ys) + margin),
+        (max(xs) + margin, min(ys) - margin),
+    ])
+
+    covered = shadow_union.intersection(bounds).area
+    total = bounds.area
+    if total == 0:
+        return 0.0
+    return (covered / total) * 100
