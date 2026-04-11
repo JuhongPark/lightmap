@@ -30,9 +30,9 @@ The shadow engine computes sun position (pvlib) and projects each building footp
 
 | Layer | Technologies |
 | --- | --- |
-| Backend | FastAPI, uvicorn |
-| Shadow engine | pvlib (sun position), Shapely + GeoPandas (geometry) |
-| Frontend | MapLibre GL JS, vanilla JavaScript |
+| Shadow engine | pvlib (sun position), Shapely (geometry projection) |
+| Map generation | folium (Leaflet-based interactive maps) |
+| Data pipeline | httpx, pandas, csv |
 | Base tiles | CARTO Positron (day), CARTO Dark Matter (night) |
 
 ## Data Sources

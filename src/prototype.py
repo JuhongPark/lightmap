@@ -26,10 +26,17 @@ CAMBRIDGE_BUILDINGS_PATH = os.path.join(
     DATA_DIR, "cambridge", "buildings", "buildings.geojson"
 )
 
-TOTAL_BOSTON_STREETLIGHTS = 74065
-TOTAL_CAMBRIDGE_STREETLIGHTS = 6117
-TOTAL_FOOD = 3207
+SHADOW_CMAP_COLORS = ["#cbd5e1", "#64748b", "#334155", "#0f172a"]
+HEATMAP_GRADIENT = {
+    0.2: "#1e3a5f", 0.4: "#2563eb", 0.6: "#60a5fa",
+    0.8: "#fbbf24", 1.0: "#ffffff",
+}
+TIME_STEPS = [7, 9, 11, 13, 15, 17]
 
+
+# ---------------------------------------------------------------------------
+# Data loading
+# ---------------------------------------------------------------------------
 
 def _sample_count(total, scale_pct):
     if scale_pct == 0:
@@ -51,8 +58,7 @@ def _pick_tallest_near_center(valid_features, center_lat=42.36, center_lon=-71.0
             dist = abs(c.y - center_lat) + abs(c.x - center_lon)
             if dist > 0.05:
                 continue
-            area = geom.area
-            score = h * (area ** 0.5)
+            score = h * (geom.area ** 0.5)
             if score > best_score:
                 best_score = score
                 best = feat
@@ -115,7 +121,6 @@ def load_streetlights(scale_pct):
     random.seed(42)
     coords = []
 
-    # Boston
     boston_path = os.path.join(DATA_DIR, "streetlights", "streetlights.csv")
     if os.path.exists(boston_path):
         all_boston = []
@@ -134,7 +139,6 @@ def load_streetlights(scale_pct):
         coords.extend(sampled)
         print(f"  Boston streetlights: {len(sampled)}/{len(all_boston)}")
 
-    # Cambridge
     cam_path = os.path.join(DATA_DIR, "cambridge", "streetlights", "streetlights.geojson")
     if os.path.exists(cam_path):
         all_cam = []
@@ -181,15 +185,7 @@ def load_food_establishments(scale_pct):
     return sampled
 
 
-def _add_ui_plugins(m, theme="light"):
-    Fullscreen(position="topleft").add_to(m)
-    MousePosition(position="bottomleft", separator=" | ", prefix="Coords: ").add_to(m)
-    tile_layer = "CartoDB positron" if theme == "light" else "CartoDB dark_matter"
-    MiniMap(toggle_display=True, minimized=True, tile_layer=tile_layer).add_to(m)
-    Geocoder(collapsed=True, position="topright").add_to(m)
-
-
-def build_day_map(target_time, altitude, azimuth, scale_pct):
+def _load_buildings_and_shadows(scale_pct, target_time):
     print("Loading buildings...")
     building_data = load_buildings(scale_pct)
     building_count = len(building_data["features"])
@@ -197,7 +193,7 @@ def build_day_map(target_time, altitude, azimuth, scale_pct):
 
     if building_count == 0:
         print("ERROR: No buildings loaded.")
-        return None
+        return None, [], 0.0
 
     tmp_path = os.path.join(DATA_DIR, "_scale_buildings.geojson")
     os.makedirs(os.path.dirname(tmp_path), exist_ok=True)
@@ -209,17 +205,28 @@ def build_day_map(target_time, altitude, azimuth, scale_pct):
     print(f"  Shadows computed: {len(shadows)}")
 
     print("Computing shadow coverage...")
-    coverage_pct = compute_shadow_coverage(shadows)
-    print(f"  Shadow coverage: {coverage_pct:.1f}%")
+    coverage = compute_shadow_coverage(shadows)
+    print(f"  Shadow coverage: {coverage:.1f}%")
 
+    return building_data, shadows, coverage
+
+
+# ---------------------------------------------------------------------------
+# Shared layer helpers (eliminate duplication)
+# ---------------------------------------------------------------------------
+
+def _create_base_map(tiles="CartoDB positron"):
     m = folium.Map(
-        location=MAP_CENTER, zoom_start=14, tiles="CartoDB positron",
+        location=MAP_CENTER, zoom_start=14, tiles=tiles,
         width="100%", height="100%",
     )
     m.get_root().html.add_child(folium.Element(
         "<style>html,body{margin:0;padding:0;height:100%;width:100%}</style>"
     ))
+    return m
 
+
+def _add_building_layer(m, building_data):
     folium.GeoJson(
         building_data,
         name="Buildings",
@@ -236,79 +243,45 @@ def build_day_map(target_time, altitude, azimuth, scale_pct):
         ),
     ).add_to(m)
 
+
+def _make_shadow_cmap():
+    return cm.LinearColormap(
+        colors=SHADOW_CMAP_COLORS, vmin=0, vmax=200,
+        caption="Shadow darkness by building height (ft)",
+    )
+
+
+def _add_shadow_layer(m, shadows, cmap):
     folium.GeoJson(
         {"type": "FeatureCollection", "features": shadows},
         name="Shadows",
         style_function=lambda x: {
-            "fillColor": "#1e293b",
-            "color": "#1e293b",
+            "fillColor": cmap(x["properties"].get("height_ft", 0)),
+            "color": cmap(x["properties"].get("height_ft", 0)),
             "weight": 0.3,
-            "fillOpacity": 0.4,
+            "fillOpacity": 0.45,
         },
         highlight_function=lambda x: {
             "weight": 2,
-            "fillOpacity": 0.6,
+            "fillOpacity": 0.65,
         },
         popup=GeoJsonPopup(
-            fields=["height_ft", "shadow_len_m"],
-            aliases=["Building Height (ft):", "Shadow Length (m):"],
+            fields=["height_ft", "shadow_len_ft"],
+            aliases=["Building Height (ft):", "Shadow Length (ft):"],
             style="font-size:12px;",
         ),
     ).add_to(m)
 
-    _add_ui_plugins(m, theme="light")
 
-    shadow_legend = cm.LinearColormap(
-        colors=["#e2e8f0", "#94a3b8", "#475569", "#1e293b"],
-        vmin=0, vmax=100,
-        caption="Shadow (building height in ft)",
-    )
-    shadow_legend.add_to(m)
-
-    info_html = (
-        f'<div style="position:fixed; top:10px; left:60px; z-index:1000;'
-        f" background:rgba(255,255,255,0.9); padding:12px 16px;"
-        f' border-radius:8px; font-family:sans-serif; font-size:13px;">'
-        f"<b>LightMap Prototype - Day ({scale_pct}%)</b><br>"
-        f"Time: {target_time.strftime('%Y-%m-%d %H:%M %Z')}<br>"
-        f"Sun altitude: {altitude:.1f}&deg;<br>"
-        f"Sun azimuth: {azimuth:.1f}&deg;<br>"
-        f"Buildings: {building_count:,} | Shadows: {len(shadows):,}<br>"
-        f"Shadow coverage: {coverage_pct:.1f}%"
-        f"</div>"
-    )
-    m.get_root().html.add_child(folium.Element(info_html))
-    return m
-
-
-def build_night_map(target_time, altitude, azimuth, scale_pct):
-    m = folium.Map(
-        location=MAP_CENTER, zoom_start=14, tiles="CartoDB dark_matter",
-        width="100%", height="100%",
-    )
-    m.get_root().html.add_child(folium.Element(
-        "<style>html,body{margin:0;padding:0;height:100%;width:100%}</style>"
-    ))
-
-    print("Loading streetlights...")
-    coords = load_streetlights(scale_pct)
+def _add_streetlight_layer(m, coords):
     if coords:
         HeatMap(
-            coords,
-            name="Streetlights",
-            radius=12,
-            blur=20,
-            gradient={
-                0.2: "#1e3a5f",
-                0.4: "#2563eb",
-                0.6: "#60a5fa",
-                0.8: "#fbbf24",
-                1.0: "#ffffff",
-            },
+            coords, name="Streetlights", radius=12, blur=20,
+            gradient=HEATMAP_GRADIENT,
         ).add_to(m)
 
-    print("Loading food establishments...")
-    places = load_food_establishments(scale_pct)
+
+def _add_food_layer(m, places):
     food_group = folium.FeatureGroup(name="Food Establishments")
     for p in places:
         popup_html = (
@@ -325,6 +298,138 @@ def build_night_map(target_time, altitude, azimuth, scale_pct):
         ).add_to(food_group)
     food_group.add_to(m)
 
+
+# ---------------------------------------------------------------------------
+# UI helpers
+# ---------------------------------------------------------------------------
+
+def _sun_description(altitude):
+    if altitude <= 0:
+        return "Below horizon"
+    if altitude < 15:
+        return "Very low sun, long shadows"
+    if altitude < 30:
+        return "Low sun, moderate shadows"
+    if altitude < 50:
+        return "Mid-height sun, short shadows"
+    return "High sun, minimal shadows"
+
+
+ONBOARDING_HTML = """
+<div id="onboarding" style="
+    position:fixed; top:0; left:0; width:100%; height:100%;
+    background:rgba(0,0,0,0.6); z-index:9999;
+    display:flex; align-items:center; justify-content:center;
+    font-family:sans-serif;">
+  <div style="
+      background:white; border-radius:12px; padding:32px 36px;
+      max-width:460px; width:90%; box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+    <h2 style="margin:0 0 8px 0; font-size:22px;">LightMap</h2>
+    <p style="margin:0 0 16px 0; color:#64748b; font-size:14px;">
+      Shade by day. Light by night.</p>
+    <p style="margin:0 0 12px 0; font-size:14px; line-height:1.6;">
+      This map shows <b>where shade falls</b> during the day and
+      <b>where streetlights shine</b> at night across Boston and Cambridge.</p>
+    <ul style="font-size:13px; line-height:1.8; padding-left:20px; margin:0 0 16px 0;">
+      <li><b>Hover</b> on a building to see its height</li>
+      <li><b>Click</b> a shadow to see building and shadow details</li>
+      <li>Use the <b>search box</b> (top-right) to find an address</li>
+      <li>Toggle <b>layers</b> on/off with the control (top-right)</li>
+    </ul>
+    <button id="onboarding-btn" style="
+        background:#1e293b; color:white; border:none; border-radius:6px;
+        padding:10px 28px; font-size:14px; cursor:pointer; width:100%;">
+      Explore the map
+    </button>
+  </div>
+</div>
+<script>
+(function(){
+  var el = document.getElementById('onboarding');
+  if (localStorage.getItem('lightmap_onboarded')) {
+    el.style.display = 'none';
+  }
+  document.getElementById('onboarding-btn').addEventListener('click', function(){
+    localStorage.setItem('lightmap_onboarded', '1');
+    el.style.display = 'none';
+  });
+})();
+</script>
+"""
+
+
+def _add_ui_plugins(m, theme="light"):
+    Fullscreen(position="topleft").add_to(m)
+    MousePosition(position="bottomleft", separator=" | ", prefix="Coords: ").add_to(m)
+    tile_layer = "CartoDB positron" if theme == "light" else "CartoDB dark_matter"
+    MiniMap(toggle_display=True, minimized=True, tile_layer=tile_layer).add_to(m)
+    Geocoder(collapsed=True, position="topright").add_to(m)
+    m.get_root().html.add_child(folium.Element(ONBOARDING_HTML))
+
+
+def _add_info_panel(m, lines, theme="light", position="left:60px"):
+    if theme == "light":
+        bg = "rgba(255,255,255,0.95)"
+        color = "#1e293b"
+        shadow = "rgba(0,0,0,0.15)"
+    else:
+        bg = "rgba(15,23,42,0.95)"
+        color = "#e2e8f0"
+        shadow = "rgba(0,0,0,0.3)"
+    content = "<br>".join(lines)
+    html = (
+        f'<div style="position:fixed; top:10px; {position}; z-index:1000;'
+        f" background:{bg}; color:{color}; padding:14px 18px;"
+        f" border-radius:8px; font-family:sans-serif; font-size:13px;"
+        f' box-shadow:0 2px 8px {shadow};">'
+        f"{content}</div>"
+    )
+    m.get_root().html.add_child(folium.Element(html))
+
+
+# ---------------------------------------------------------------------------
+# Map builders
+# ---------------------------------------------------------------------------
+
+def build_day_map(target_time, altitude, azimuth, scale_pct):
+    building_data, shadows, coverage = _load_buildings_and_shadows(scale_pct, target_time)
+    if building_data is None:
+        return None
+
+    building_count = len(building_data["features"])
+    m = _create_base_map("CartoDB positron")
+
+    _add_building_layer(m, building_data)
+    cmap = _make_shadow_cmap()
+    _add_shadow_layer(m, shadows, cmap)
+    _add_ui_plugins(m, theme="light")
+    cmap.add_to(m)
+
+    sun_desc = _sun_description(altitude)
+    time_str = target_time.strftime("%b %d, %Y %I:%M %p")
+    _add_info_panel(m, [
+        "<b>LightMap</b> &mdash; Shadow Map",
+        f'<span style="color:#64748b;">{time_str}</span>',
+        sun_desc,
+        f"{building_count:,} buildings &middot; {len(shadows):,} shadows",
+        f"<b>{coverage:.1f}%</b> of area in shadow",
+        '<span style="color:#94a3b8; font-size:11px;">'
+        "Building heights: Boston 2010, Cambridge 2018</span>",
+    ])
+    return m
+
+
+def build_night_map(target_time, altitude, azimuth, scale_pct):
+    m = _create_base_map("CartoDB dark_matter")
+
+    print("Loading streetlights...")
+    coords = load_streetlights(scale_pct)
+    _add_streetlight_layer(m, coords)
+
+    print("Loading food establishments...")
+    places = load_food_establishments(scale_pct)
+    _add_food_layer(m, places)
+
     _add_ui_plugins(m, theme="dark")
 
     brightness_legend = cm.LinearColormap(
@@ -334,40 +439,27 @@ def build_night_map(target_time, altitude, azimuth, scale_pct):
     )
     brightness_legend.add_to(m)
 
-    info_html = (
-        f'<div style="position:fixed; top:10px; left:60px; z-index:1000;'
-        f" background:rgba(15,23,42,0.9); color:#e2e8f0; padding:12px 16px;"
-        f' border-radius:8px; font-family:sans-serif; font-size:13px;">'
-        f"<b>LightMap Prototype - Night ({scale_pct}%)</b><br>"
-        f"Time: {target_time.strftime('%Y-%m-%d %H:%M %Z')}<br>"
-        f"Sun altitude: {altitude:.1f}&deg;<br>"
-        f"Streetlights: {len(coords):,} | Food: {len(places):,}"
-        f"</div>"
-    )
-    m.get_root().html.add_child(folium.Element(info_html))
+    time_str = target_time.strftime("%b %d, %Y %I:%M %p")
+    _add_info_panel(m, [
+        "<b>LightMap</b> &mdash; Brightness Map",
+        f'<span style="color:#94a3b8;">{time_str}</span>',
+        f"{len(coords):,} streetlights &middot; {len(places):,} food places",
+        '<span style="color:#64748b; font-size:11px;">'
+        "Source: data.boston.gov, Cambridge GIS</span>",
+    ], theme="dark")
     return m
 
 
-TIME_STEPS = [7, 9, 11, 13, 15, 17]
-
-
 def build_time_map(target_time, scale_pct):
-    print("Loading buildings...")
-    building_data = load_buildings(scale_pct)
-    building_count = len(building_data["features"])
-    print(f"  Total buildings: {building_count}")
-
-    if building_count == 0:
-        print("ERROR: No buildings loaded.")
+    building_data, _, _ = _load_buildings_and_shadows(scale_pct, target_time)
+    if building_data is None:
         return None
 
+    building_count = len(building_data["features"])
     tmp_path = os.path.join(DATA_DIR, "_scale_buildings.geojson")
-    os.makedirs(os.path.dirname(tmp_path), exist_ok=True)
-    with open(tmp_path, "w") as f:
-        json.dump(building_data, f)
 
-    # Compute shadows at each time step
     all_features = []
+    height_cmap = cm.LinearColormap(colors=SHADOW_CMAP_COLORS, vmin=0, vmax=200)
     for hour in TIME_STEPS:
         step_time = datetime(
             target_time.year, target_time.month, target_time.day,
@@ -385,78 +477,43 @@ def build_time_map(target_time, scale_pct):
         print(f"    Shadows: {len(shadows)}")
 
         for feat in shadows:
+            h = feat["properties"].get("height_ft", 0)
+            color = height_cmap(h)
             all_features.append({
                 "type": "Feature",
                 "geometry": feat["geometry"],
                 "properties": {
                     "times": [timestamp],
                     "style": {
-                        "fillColor": "#1e293b",
-                        "color": "#1e293b",
-                        "weight": 0.3,
-                        "fillOpacity": 0.4,
+                        "fillColor": color, "color": color,
+                        "weight": 0.3, "fillOpacity": 0.45,
                     },
                 },
             })
 
-    m = folium.Map(
-        location=MAP_CENTER, zoom_start=14, tiles="CartoDB positron",
-        width="100%", height="100%",
-    )
-    m.get_root().html.add_child(folium.Element(
-        "<style>html,body{margin:0;padding:0;height:100%;width:100%}</style>"
-    ))
+    m = _create_base_map("CartoDB positron")
+    _add_building_layer(m, building_data)
 
-    # Static building layer
-    folium.GeoJson(
-        building_data,
-        name="Buildings",
-        style_function=lambda x: {
-            "fillColor": "#64748b",
-            "color": "#475569",
-            "weight": 0.5,
-            "fillOpacity": 0.6,
-        },
-        tooltip=GeoJsonTooltip(
-            fields=["BLDG_HGT_2010"],
-            aliases=["Height (ft):"],
-            style="font-size:12px;",
-        ),
-    ).add_to(m)
-
-    # Animated shadow layer
     TimestampedGeoJson(
         {"type": "FeatureCollection", "features": all_features},
-        period="PT2H",
-        duration="PT2H",
-        transition_time=500,
-        auto_play=True,
-        loop=True,
-        loop_button=True,
-        speed_slider=True,
-        date_options="HH:mm",
+        period="PT2H", duration="PT2H", transition_time=500,
+        auto_play=True, loop=True, loop_button=True,
+        speed_slider=True, date_options="HH:mm",
     ).add_to(m)
 
     _add_ui_plugins(m, theme="light")
 
-    shadow_legend = cm.LinearColormap(
-        colors=["#e2e8f0", "#94a3b8", "#475569", "#1e293b"],
-        vmin=0, vmax=100,
-        caption="Shadow (building height in ft)",
-    )
-    shadow_legend.add_to(m)
+    legend = _make_shadow_cmap()
+    legend.add_to(m)
 
-    info_html = (
-        '<div style="position:fixed; top:10px; left:60px; z-index:1000;'
-        " background:rgba(255,255,255,0.9); padding:12px 16px;"
-        ' border-radius:8px; font-family:sans-serif; font-size:13px;">'
-        f"<b>LightMap - Shadow Animation ({scale_pct}%)</b><br>"
-        f"Date: {target_time.strftime('%Y-%m-%d')}<br>"
-        f"Buildings: {building_count:,}<br>"
-        f"Time steps: {len(TIME_STEPS)} (7 AM - 5 PM)"
-        "</div>"
-    )
-    m.get_root().html.add_child(folium.Element(info_html))
+    date_str = target_time.strftime("%b %d, %Y")
+    _add_info_panel(m, [
+        "<b>LightMap</b> &mdash; Shadow Animation",
+        f'<span style="color:#64748b;">{date_str}</span>',
+        f"{building_count:,} buildings &middot; 7 AM to 5 PM",
+        '<span style="color:#64748b; font-size:11px;">'
+        "Press play to watch shadows move through the day</span>",
+    ])
 
     folium.LayerControl().add_to(m)
     return m
@@ -471,145 +528,53 @@ def build_dual_map(target_time, scale_pct):
         target_time.year, target_time.month, target_time.day,
         22, 0, tzinfo=BOSTON_TZ,
     )
-    day_alt, day_az = get_sun_position(day_time)
-    night_alt, night_az = get_sun_position(night_time)
+    day_alt, _ = get_sun_position(day_time)
 
     print(f"Dual map: day={day_time.strftime('%H:%M')}, night={night_time.strftime('%H:%M')}")
-    print(f"  Day sun: alt={day_alt:.1f}, az={day_az:.1f}")
-    print(f"  Night sun: alt={night_alt:.1f}, az={night_az:.1f}")
 
-    # Load data
-    print("Loading buildings...")
-    building_data = load_buildings(scale_pct)
-    building_count = len(building_data["features"])
-    print(f"  Total buildings: {building_count}")
-
-    if building_count == 0:
-        print("ERROR: No buildings loaded.")
+    building_data, shadows, coverage = _load_buildings_and_shadows(scale_pct, day_time)
+    if building_data is None:
         return None
-
-    tmp_path = os.path.join(DATA_DIR, "_scale_buildings.geojson")
-    os.makedirs(os.path.dirname(tmp_path), exist_ok=True)
-    with open(tmp_path, "w") as f:
-        json.dump(building_data, f)
-
-    print("Computing shadows...")
-    shadows, _, _ = compute_all_shadows(tmp_path, day_time)
-    print(f"  Shadows computed: {len(shadows)}")
-
-    print("Computing shadow coverage...")
-    coverage_pct = compute_shadow_coverage(shadows)
-    print(f"  Shadow coverage: {coverage_pct:.1f}%")
+    building_count = len(building_data["features"])
 
     print("Loading streetlights...")
     coords = load_streetlights(scale_pct)
-
     print("Loading food establishments...")
     places = load_food_establishments(scale_pct)
 
-    # Build dual map
     dm = DualMap(location=MAP_CENTER, zoom_start=14, tiles=None)
     folium.TileLayer("CartoDB positron").add_to(dm.m1)
     folium.TileLayer("CartoDB dark_matter").add_to(dm.m2)
 
-    # Day side (m1): buildings + shadows
-    folium.GeoJson(
-        building_data,
-        name="Buildings",
-        style_function=lambda x: {
-            "fillColor": "#64748b",
-            "color": "#475569",
-            "weight": 0.5,
-            "fillOpacity": 0.6,
-        },
-        tooltip=GeoJsonTooltip(
-            fields=["BLDG_HGT_2010"],
-            aliases=["Height (ft):"],
-            style="font-size:12px;",
-        ),
-    ).add_to(dm.m1)
+    # Day side
+    _add_building_layer(dm.m1, building_data)
+    cmap = cm.LinearColormap(colors=SHADOW_CMAP_COLORS, vmin=0, vmax=200)
+    _add_shadow_layer(dm.m1, shadows, cmap)
 
-    folium.GeoJson(
-        {"type": "FeatureCollection", "features": shadows},
-        name="Shadows",
-        style_function=lambda x: {
-            "fillColor": "#1e293b",
-            "color": "#1e293b",
-            "weight": 0.3,
-            "fillOpacity": 0.4,
-        },
-        highlight_function=lambda x: {
-            "weight": 2,
-            "fillOpacity": 0.6,
-        },
-        popup=GeoJsonPopup(
-            fields=["height_ft", "shadow_len_m"],
-            aliases=["Building Height (ft):", "Shadow Length (m):"],
-            style="font-size:12px;",
-        ),
-    ).add_to(dm.m1)
-
-    # Night side (m2): streetlights + food
-    if coords:
-        HeatMap(
-            coords,
-            name="Streetlights",
-            radius=12,
-            blur=20,
-            gradient={
-                0.2: "#1e3a5f",
-                0.4: "#2563eb",
-                0.6: "#60a5fa",
-                0.8: "#fbbf24",
-                1.0: "#ffffff",
-            },
-        ).add_to(dm.m2)
-
-    food_group = folium.FeatureGroup(name="Food Establishments")
-    for p in places:
-        popup_html = (
-            '<div style="font-family:sans-serif; font-size:12px; min-width:120px;">'
-            f'<b>{p["name"]}</b></div>'
-        )
-        folium.CircleMarker(
-            location=[p["lat"], p["lon"]],
-            radius=3,
-            color="#fbbf24",
-            fill=True,
-            fill_opacity=0.8,
-            popup=folium.Popup(popup_html, max_width=200),
-        ).add_to(food_group)
-    food_group.add_to(dm.m2)
+    # Night side
+    _add_streetlight_layer(dm.m2, coords)
+    _add_food_layer(dm.m2, places)
 
     # Info panels
-    day_info = (
-        '<div style="position:fixed; top:10px; left:10px; z-index:1000;'
-        " background:rgba(255,255,255,0.9); padding:10px 14px;"
-        ' border-radius:8px; font-family:sans-serif; font-size:12px;">'
-        f"<b>Day ({scale_pct}%)</b><br>"
-        f"Time: {day_time.strftime('%H:%M')}<br>"
-        f"Sun: {day_alt:.1f}&deg;<br>"
-        f"Buildings: {building_count:,}<br>"
-        f"Shadows: {len(shadows):,}<br>"
-        f"Coverage: {coverage_pct:.1f}%"
-        "</div>"
-    )
-    dm.m1.get_root().html.add_child(folium.Element(day_info))
+    sun_desc = _sun_description(day_alt)
+    _add_info_panel(dm.m1, [
+        f"<b>Shadow Map</b> &middot; {day_time.strftime('%I:%M %p')}",
+        sun_desc,
+        f"{building_count:,} buildings &middot; <b>{coverage:.1f}%</b> in shadow",
+        '<span style="color:#94a3b8; font-size:10px;">Heights: Boston 2010, Cambridge 2018</span>',
+    ], position="left:10px")
 
-    night_info = (
-        '<div style="position:fixed; top:10px; right:10px; z-index:1000;'
-        " background:rgba(15,23,42,0.9); color:#e2e8f0; padding:10px 14px;"
-        ' border-radius:8px; font-family:sans-serif; font-size:12px;">'
-        f"<b>Night ({scale_pct}%)</b><br>"
-        f"Time: {night_time.strftime('%H:%M')}<br>"
-        f"Streetlights: {len(coords):,}<br>"
-        f"Food: {len(places):,}"
-        "</div>"
-    )
-    dm.m1.get_root().html.add_child(folium.Element(night_info))
+    _add_info_panel(dm.m1, [
+        f"<b>Brightness Map</b> &middot; {night_time.strftime('%I:%M %p')}",
+        f"{len(coords):,} streetlights &middot; {len(places):,} food places",
+    ], theme="dark", position="right:10px")
 
     return dm
 
+
+# ---------------------------------------------------------------------------
+# Entry points
+# ---------------------------------------------------------------------------
 
 def build_map(target_time, scale_pct=1, dual=False, time_compare=False):
     os.makedirs(OUT_DIR, exist_ok=True)
@@ -617,37 +582,26 @@ def build_map(target_time, scale_pct=1, dual=False, time_compare=False):
 
     if time_compare:
         m = build_time_map(target_time, scale_pct)
-        if m is None:
-            return None
-        m.save(out_path)
-        print(f"Saved: {out_path}")
-        return out_path
-
-    if dual:
+    elif dual:
         m = build_dual_map(target_time, scale_pct)
-        if m is None:
-            return None
-        m.save(out_path)
-        print(f"Saved: {out_path}")
-        return out_path
-
-    altitude, azimuth = get_sun_position(target_time)
-    is_day = altitude > 0
-    mode = "Day" if is_day else "Night"
-
-    print(f"Time: {target_time.strftime('%Y-%m-%d %H:%M %Z')}")
-    print(f"Sun: altitude={altitude:.1f}, azimuth={azimuth:.1f}")
-    print(f"Mode: {mode} | Scale: {scale_pct}%")
-
-    if is_day:
-        m = build_day_map(target_time, altitude, azimuth, scale_pct)
     else:
-        m = build_night_map(target_time, altitude, azimuth, scale_pct)
+        altitude, azimuth = get_sun_position(target_time)
+        is_day = altitude > 0
+        mode = "Day" if is_day else "Night"
+        print(f"Time: {target_time.strftime('%Y-%m-%d %H:%M %Z')}")
+        print(f"Sun: altitude={altitude:.1f}, azimuth={azimuth:.1f}")
+        print(f"Mode: {mode} | Scale: {scale_pct}%")
+
+        if is_day:
+            m = build_day_map(target_time, altitude, azimuth, scale_pct)
+        else:
+            m = build_night_map(target_time, altitude, azimuth, scale_pct)
+
+        if m is not None:
+            folium.LayerControl().add_to(m)
 
     if m is None:
         return None
-
-    folium.LayerControl().add_to(m)
 
     m.save(out_path)
     print(f"Saved: {out_path}")
@@ -657,31 +611,23 @@ def build_map(target_time, scale_pct=1, dual=False, time_compare=False):
 def main():
     parser = argparse.ArgumentParser(description="LightMap prototype")
     parser.add_argument(
-        "--time",
-        type=str,
-        default="2025-07-15 14:00",
+        "--time", type=str, default="2025-07-15 14:00",
         help="Target time (YYYY-MM-DD HH:MM)",
     )
     parser.add_argument(
-        "--night",
-        action="store_true",
+        "--night", action="store_true",
         help="Force night mode (2025-07-15 22:00)",
     )
     parser.add_argument(
-        "--scale",
-        type=int,
-        default=1,
-        choices=[0, 1, 10, 50, 100],
+        "--scale", type=int, default=1, choices=[0, 1, 10, 50, 100],
         help="Percent of data to use (0=1 each, 1, 10, 50, 100)",
     )
     parser.add_argument(
-        "--dual",
-        action="store_true",
+        "--dual", action="store_true",
         help="Dual map: day (left) + night (right) side by side",
     )
     parser.add_argument(
-        "--time-compare",
-        action="store_true",
+        "--time-compare", action="store_true",
         help="Shadow animation across 6 time steps (7 AM - 5 PM)",
     )
     args = parser.parse_args()

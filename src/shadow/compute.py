@@ -105,13 +105,22 @@ def compute_all_shadows(geojson_path, dt, height_field="BLDG_HGT_2010"):
             "type": "Feature",
             "properties": {
                 "height_ft": height_ft,
-                "shadow_len_m": round(shadow_len, 1),
+                "shadow_len_ft": round(shadow_len / 0.3048, 1),
                 "type": "shadow",
             },
             "geometry": mapping(shadow),
         })
 
     return features, altitude, azimuth
+
+
+# Fixed study area covering Boston and Cambridge urban core
+STUDY_AREA = Polygon([
+    (-71.16, 42.30),
+    (-71.16, 42.40),
+    (-71.03, 42.40),
+    (-71.03, 42.30),
+])
 
 
 def compute_shadow_coverage(shadow_features):
@@ -131,31 +140,6 @@ def compute_shadow_coverage(shadow_features):
         return 0.0
 
     shadow_union = unary_union(shadow_polys)
-
-    building_centroids = []
-    for feat in shadow_features:
-        try:
-            geom = shape(feat["geometry"])
-            c = geom.centroid
-            building_centroids.append((c.x, c.y))
-        except Exception:
-            continue
-
-    if not building_centroids:
-        return 0.0
-
-    xs = [p[0] for p in building_centroids]
-    ys = [p[1] for p in building_centroids]
-    margin = 0.005
-    bounds = Polygon([
-        (min(xs) - margin, min(ys) - margin),
-        (max(xs) - margin, max(ys) + margin),
-        (max(xs) + margin, max(ys) + margin),
-        (max(xs) + margin, min(ys) - margin),
-    ])
-
-    covered = shadow_union.intersection(bounds).area
-    total = bounds.area
-    if total == 0:
-        return 0.0
+    covered = shadow_union.intersection(STUDY_AREA).area
+    total = STUDY_AREA.area
     return (covered / total) * 100
