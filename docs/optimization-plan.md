@@ -6,19 +6,56 @@ Track every optimization step with before/after benchmarks. Each version has a m
 
 ## Version History
 
-| Version | Commit | Description |
-|---------|--------|-------------|
-| v1 | `6ba0669` | Scale prototype to 100%. No optimization. Original baseline. |
-| v2 | `525fa63` | Persona-driven refactor. Shared helpers, fixed coverage. Measured baseline. |
-| v3 | `a00926f` | Remove temp file I/O. Pass parsed data in memory. |
-| v4 | `d792304` | STRtree-batched coverage (50x50 cells). Also fixes incorrect coverage value. |
-| v5 | `787e7da` | SQLite + WKB pre-processed building database |
-| v6 | `ef98977` | PostgreSQL + PostGIS (GiST indexed, SQL-side shadow projection) |
-| v7a | `0f62b62` | Skip shapely ↔ dict round-trip in coverage |
-| v7b | `f2ac253` | Force PostgreSQL 8 parallel workers on buildings table |
-| v7c | `72a14f2` | Batch shapely.from_wkb for shadow decoding |
-| v7d | `5f5b315` | disjoint_subset_union_all alternative (not used at 100% scale) |
-| v7e | `1680157` | Rasterize coverage via rasterio (production path) |
+Each row lists the single key change that version introduced on top of the previous one. All v3-v7e changes landed as a single squashed commit in the final git history, so commit hashes are not referenced here.
+
+| Version | Key change | Why it matters |
+|---------|------------|----------------|
+| v1 | Scale prototype to 100% | Original baseline. Ran through the raw pipeline with no performance work. |
+| v2 | Persona-driven refactor + fixed coverage STUDY_AREA | Clean baseline for real measurements. Shared map-building helpers, stable study area polygon. |
+| v3 | Removed temp GeoJSON file, pass parsed data in memory | Eliminated 10 s of unnecessary JSON serialize-write-read-parse every run. |
+| v4 | STRtree-batched coverage in 50x50 cells | `unary_union` cost is near-quadratic on 123K polygons. Partitioning makes each cell's union cheap. Also uncovered a correctness bug in the prior coverage number. |
+| v5 | SQLite + WKB preprocessed building store | Binary blob loading is faster than JSON, and the preprocessing step is run once offline. |
+| v6 | PostgreSQL + PostGIS with a GiST spatial index | Shadow projection becomes a parallel SQL query over indexed geometry. |
+| v7a | Skip shapely to dict to shapely round-trip in coverage | The shadow polygons already exist as shapely objects after PostGIS decode. Re-parsing them from GeoJSON dicts was 47% of the coverage wall time. |
+| v7b | Force PostgreSQL to use 8 parallel workers on buildings | The planner's default capped parallelism at 2 workers for a 50 MB table. Forcing 8 gave near-linear speedup on the per-row translate and hull work. |
+| v7c | Batch `shapely.from_wkb` for shadow decoding | Replaces a per-row Python loop with one vectorized C call that releases the GIL. |
+| v7d | Alternative coverage via `disjoint_subset_union_all` | Dropped at 100% scale because STRtree partitioning still wins at 123K polygons, but kept as an alternative path since it beats STRtree on smaller datasets. |
+| v7e | Rasterize coverage via rasterio | For "area of the union of N polygons" when only the area matters, rasterization skips the expensive vector union. Became the production coverage path. |
+
+## Benchmark Environment
+
+All measurements were taken on a single machine. Numbers are meaningful against each other on this hardware, but absolute wall time will differ on other setups.
+
+| Component | Spec |
+|---|---|
+| CPU | 12th Gen Intel Core i3-1220P, 6 cores / 12 threads |
+| RAM | 9.7 GB available to WSL2 |
+| Host OS | Windows with WSL2 (kernel 6.6.87.2-microsoft-standard-WSL2) |
+| Guest OS | Ubuntu 24.04.4 LTS |
+| Python | 3.12.3 |
+| PostGIS | 16-3.4 running inside Docker 29.1.3, GEOS 3.9.0, PROJ 7.2.1 |
+| Shapely | 2.1.2 backed by GEOS 3.13.1 |
+| NumPy | 2.4.4 |
+
+### Important caveat: noisy environment
+
+The benchmarks were run while the host was also executing other interactive workloads. Most notably, multiple VSCode Pylance language server processes were consuming around 1.6 GB of RAM combined and competing for CPU with the Python benchmark process. Swap was being actively used during parts of the session, with peak RSS for the benchmark around 1.3-1.7 GB.
+
+As a result:
+
+- Absolute wall times for stages like `shadow_projection` and `compute_coverage` swung up to 3x between runs in the same configuration.
+- Best-of-5 was used to partially compensate, but the tail values were still noisy.
+- Side-by-side comparisons within a single benchmark run are the most reliable signal, since all paths experience the same system state in that moment.
+- The final day pipeline of "about 12 s of compute" is a loaded-host number. On a clean, idle machine with the Pylance processes killed and swap clear, expect roughly half of that.
+
+**Clean-environment re-testing is still needed.** A proper rerun should:
+
+1. Close VSCode or at least stop the language server processes
+2. Verify swap is empty (`swapoff -a && swapon -a` if necessary)
+3. Start the PostGIS container fresh (`docker restart lightmap-postgis`)
+4. Wait a few seconds for the DB to warm up
+5. Run `.venv/bin/python scripts/benchmark.py` twice, using the second run as the record
+6. Compare against the numbers in this document for drift
 
 ## Benchmark Protocol
 
