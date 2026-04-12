@@ -3,18 +3,58 @@ import csv
 import json
 import os
 import random
+import sqlite3
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import folium
 import branca.colormap as cm
+import shapely as shapely_module
 from folium.features import GeoJsonPopup, GeoJsonTooltip
 from folium.plugins import (
     DualMap, Fullscreen, Geocoder, HeatMap, MiniMap, MousePosition,
     TimestampedGeoJson,
 )
+from shapely.geometry import mapping
+from shapely.wkb import loads as wkb_loads
 
-from shadow.compute import compute_all_shadows, compute_shadow_coverage, get_sun_position
+
+def wkb_loads_batch(wkb_blobs):
+    """Decode many WKB blobs in one shapely ufunc call."""
+    return shapely_module.from_wkb([bytes(b) for b in wkb_blobs]).tolist()
+
+from shadow.compute import (
+    compute_all_shadows,
+    compute_shadow_coverage,
+    compute_shadow_coverage_from_polys,
+    compute_shadow_coverage_raster,
+    get_sun_position,
+    parse_building_features,
+)
+
+try:
+    from shadow.postgis_compute import (
+        compute_all_shadows_postgis,
+        get_connection as get_postgis_connection,
+        load_buildings_postgis,
+    )
+    _POSTGIS_AVAILABLE = True
+except ImportError:
+    _POSTGIS_AVAILABLE = False
+
+
+def _postgis_enabled():
+    """PostGIS is used only if the driver imports AND the connection works."""
+    if not _POSTGIS_AVAILABLE:
+        return False
+    if os.environ.get("LIGHTMAP_NO_POSTGIS"):
+        return False
+    try:
+        conn = get_postgis_connection()
+        conn.close()
+        return True
+    except Exception:
+        return False
 
 BOSTON_TZ = ZoneInfo("US/Eastern")
 MAP_CENTER = [42.36, -71.08]
@@ -25,6 +65,7 @@ BOSTON_BUILDINGS_PATH = os.path.join(DATA_DIR, "buildings", "boston_buildings.ge
 CAMBRIDGE_BUILDINGS_PATH = os.path.join(
     DATA_DIR, "cambridge", "buildings", "buildings.geojson"
 )
+BUILDINGS_DB_PATH = os.path.join(DATA_DIR, "buildings.db")
 
 SHADOW_CMAP_COLORS = ["#cbd5e1", "#64748b", "#334155", "#0f172a"]
 HEATMAP_GRADIENT = {
@@ -67,11 +108,72 @@ def _pick_tallest_near_center(valid_features, center_lat=42.36, center_lon=-71.0
     return best
 
 
+def _load_buildings_from_db(scale_pct):
+    """Load buildings from the pre-processed SQLite database.
+
+    Returns (geojson_dict, parsed_tuples). parsed_tuples is a list of
+    (shapely_polygon, height_ft), usable directly by compute_all_shadows
+    without any further parsing.
+    """
+    random.seed(42)
+    conn = sqlite3.connect(BUILDINGS_DB_PATH)
+    c = conn.cursor()
+
+    features = []
+    parsed = []
+    for city in ("cambridge", "boston"):
+        rows = c.execute(
+            "SELECT height_ft, geom FROM buildings WHERE city = ?", (city,)
+        ).fetchall()
+
+        if scale_pct == 0:
+            # Still support "1 each" mode -- need JSON path for tallest-near-center
+            # Fall back to JSON for scale=0 since it's a rarely used debug mode
+            conn.close()
+            return None
+
+        n = _sample_count(len(rows), scale_pct)
+        sampled = random.sample(rows, min(n, len(rows)))
+        print(f"  {city.capitalize()} buildings: {len(sampled)}/{len(rows)}")
+        wkb_blobs = [row[1] for row in sampled]
+        if wkb_blobs:
+            polys = wkb_loads_batch(wkb_blobs)
+        else:
+            polys = []
+        # Simplify + coordinate rounding to keep the rendered HTML small.
+        simp_polys = shapely_module.simplify(polys, 5e-5, preserve_topology=True).tolist() if polys else []
+        for i, (height_ft, _wkb) in enumerate(sampled):
+            full = polys[i]
+            parsed.append((full, float(height_ft)))
+            display = simp_polys[i] if (simp_polys and not simp_polys[i].is_empty) else full
+            coords = [
+                (round(x, 6), round(y, 6))
+                for x, y in display.exterior.coords
+            ]
+            features.append({
+                "type": "Feature",
+                "properties": {"BLDG_HGT_2010": round(float(height_ft), 1)},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [coords],
+                },
+            })
+
+    conn.close()
+    return {"type": "FeatureCollection", "features": features}, parsed
+
+
 def load_buildings(scale_pct):
+    # Prefer pre-processed SQLite DB (v5)
+    if os.path.exists(BUILDINGS_DB_PATH) and scale_pct != 0:
+        result = _load_buildings_from_db(scale_pct)
+        if result is not None:
+            return result[0]
+
+    # Legacy GeoJSON path (also used by scale=0 tallest-near-center mode)
     random.seed(42)
     features = []
 
-    # Cambridge buildings
     if os.path.exists(CAMBRIDGE_BUILDINGS_PATH):
         with open(CAMBRIDGE_BUILDINGS_PATH) as f:
             data = json.load(f)
@@ -94,7 +196,6 @@ def load_buildings(scale_pct):
         features.extend(sampled)
         print(f"  Cambridge buildings: {len(sampled)}/{len(valid)}")
 
-    # Boston buildings
     if os.path.exists(BOSTON_BUILDINGS_PATH):
         with open(BOSTON_BUILDINGS_PATH) as f:
             data = json.load(f)
@@ -115,6 +216,19 @@ def load_buildings(scale_pct):
         print("  Boston buildings: not downloaded")
 
     return {"type": "FeatureCollection", "features": features}
+
+
+def load_buildings_with_parsed(scale_pct):
+    """Load buildings returning both GeoJSON (for folium) and parsed tuples
+    (for shadow computation). Uses SQLite DB if available to skip re-parsing."""
+    if os.path.exists(BUILDINGS_DB_PATH) and scale_pct != 0:
+        result = _load_buildings_from_db(scale_pct)
+        if result is not None:
+            return result
+    # Fallback: load via GeoJSON then parse
+    building_data = load_buildings(scale_pct)
+    parsed = parse_building_features(building_data["features"])
+    return building_data, parsed
 
 
 def load_streetlights(scale_pct):
@@ -186,8 +300,33 @@ def load_food_establishments(scale_pct):
 
 
 def _load_buildings_and_shadows(scale_pct, target_time):
+    # v6/v7: PostGIS path (only at 100% scale for now)
+    if scale_pct == 100 and _postgis_enabled():
+        conn = get_postgis_connection()
+        try:
+            print("Computing shadows (PostGIS)...")
+            shadows, shadow_polys, _, _ = compute_all_shadows_postgis(
+                conn, target_time, return_polygons=True,
+            )
+            print(f"  Shadows computed: {len(shadows)}")
+        finally:
+            conn.close()
+
+        # At 100% scale we skip the separate building layer entirely. Each
+        # shadow polygon is the ConvexHull of the building plus its
+        # translation, so it visually contains the building footprint. A
+        # separate building layer would double the rendered geometry for no
+        # visual benefit, and at 123K polygons that doubling costs ~50 MB
+        # in the output HTML.
+        building_data = {"type": "FeatureCollection", "features": []}
+
+        print("Computing shadow coverage...")
+        coverage = compute_shadow_coverage_raster(shadow_polys, resolution_m=10.0)
+        print(f"  Shadow coverage: {coverage:.1f}%")
+        return building_data, shadows, coverage
+
     print("Loading buildings...")
-    building_data = load_buildings(scale_pct)
+    building_data, parsed = load_buildings_with_parsed(scale_pct)
     building_count = len(building_data["features"])
     print(f"  Total buildings: {building_count}")
 
@@ -195,20 +334,25 @@ def _load_buildings_and_shadows(scale_pct, target_time):
         print("ERROR: No buildings loaded.")
         return None, [], 0.0
 
-    tmp_path = os.path.join(DATA_DIR, "_scale_buildings.geojson")
-    os.makedirs(os.path.dirname(tmp_path), exist_ok=True)
-    with open(tmp_path, "w") as f:
-        json.dump(building_data, f)
+    # Skip the building layer when there are enough shadows to cover every
+    # building visually. Each shadow is ConvexHull of building+translated, so
+    # it already contains the building footprint. Drawing a second layer on
+    # top is redundant above ~10K features and doubles the rendered HTML.
+    if building_count > 10000:
+        print("  Building layer skipped for rendering (shadows cover it)")
+        render_building_data = {"type": "FeatureCollection", "features": []}
+    else:
+        render_building_data = building_data
 
     print("Computing shadows...")
-    shadows, _, _ = compute_all_shadows(tmp_path, target_time)
+    shadows, _, _ = compute_all_shadows(parsed, target_time)
     print(f"  Shadows computed: {len(shadows)}")
 
     print("Computing shadow coverage...")
     coverage = compute_shadow_coverage(shadows)
     print(f"  Shadow coverage: {coverage:.1f}%")
 
-    return building_data, shadows, coverage
+    return render_building_data, shadows, coverage
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +371,8 @@ def _create_base_map(tiles="CartoDB positron"):
 
 
 def _add_building_layer(m, building_data):
+    if not building_data.get("features"):
+        return
     folium.GeoJson(
         building_data,
         name="Buildings",
@@ -396,7 +542,10 @@ def build_day_map(target_time, altitude, azimuth, scale_pct):
     if building_data is None:
         return None
 
-    building_count = len(building_data["features"])
+    # building_count falls back to shadow count when the building layer was
+    # dropped for size reasons at 100% scale. Each shadow corresponds to one
+    # building anyway.
+    building_count = len(building_data["features"]) or len(shadows)
     m = _create_base_map("CartoDB positron")
 
     _add_building_layer(m, building_data)
@@ -451,12 +600,13 @@ def build_night_map(target_time, altitude, azimuth, scale_pct):
 
 
 def build_time_map(target_time, scale_pct):
-    building_data, _, _ = _load_buildings_and_shadows(scale_pct, target_time)
-    if building_data is None:
-        return None
-
+    print("Loading buildings...")
+    building_data, parsed = load_buildings_with_parsed(scale_pct)
     building_count = len(building_data["features"])
-    tmp_path = os.path.join(DATA_DIR, "_scale_buildings.geojson")
+    print(f"  Total buildings: {building_count}")
+    if building_count == 0:
+        print("ERROR: No buildings loaded.")
+        return None
 
     all_features = []
     height_cmap = cm.LinearColormap(colors=SHADOW_CMAP_COLORS, vmin=0, vmax=200)
@@ -473,7 +623,7 @@ def build_time_map(target_time, scale_pct):
             print(f"    Skipped (sun below horizon)")
             continue
 
-        shadows, _, _ = compute_all_shadows(tmp_path, step_time)
+        shadows, _, _ = compute_all_shadows(parsed, step_time)
         print(f"    Shadows: {len(shadows)}")
 
         for feat in shadows:
