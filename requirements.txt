@@ -5,3 +5,5 @@ numpy>=2.4
 httpx>=0.28
 folium>=0.20
 tzdata>=2024.1
+psycopg2-binary>=2.9
+rasterio>=1.5
