@@ -211,3 +211,7 @@ __marimo__/
 
 # Project data
 data/
+
+# Benchmark result JSON files. Users run scripts/benchmark.py locally;
+# commit specific runs only if you want to preserve a baseline.
+benchmarks/
