@@ -1,0 +1,351 @@
+{
+  "label": "step1-vectorize-load",
+  "timestamp": "2026-04-13T22:26:41.635872+00:00",
+  "config": {
+    "scale_pct": 100,
+    "runs": 5,
+    "warmup": 1,
+    "day_time_iso": "2025-07-15T14:00:00-04:00",
+    "night_time_iso": "2025-07-15T22:00:00-04:00",
+    "include_disjoint": false,
+    "raster_resolution_m": 10.0,
+    "coverage_grid_cells": 50
+  },
+  "environment": {
+    "cpu": "12th Gen Intel(R) Core(TM) i3-1220P",
+    "cores": 12,
+    "ram_mb": 9945,
+    "os": "Ubuntu 24.04.4 LTS",
+    "kernel": "6.6.87.2-microsoft-standard-WSL2",
+    "python": "3.12.3",
+    "shapely": "2.1.2",
+    "numpy": "2.4.4",
+    "folium": "0.20.0",
+    "rasterio": "1.5.0",
+    "psycopg2": "2.9.9 (dt dec pq3 ext lo64)",
+    "postgis": "3.4.3",
+    "postgis_enabled": true
+  },
+  "git": {
+    "commit": "2568647",
+    "branch": "main",
+    "dirty": true
+  },
+  "stages": {
+    "load_buildings": {
+      "best": 2.343820196008892,
+      "runs": [
+        2.3726847660000203,
+        2.343820196008892,
+        2.377767252997728,
+        2.4008195889909985,
+        2.361660644004587
+      ],
+      "median": 2.3726847660000203,
+      "mean": 2.371350489600445,
+      "stdev": 0.018778674808442558,
+      "cov": 0.00791897903359137,
+      "max_min_ratio": 1.0243190126440442,
+      "noisy": false
+    },
+    "shadow_projection": {
+      "best": 5.199377026001457,
+      "runs": [
+        5.22012437300873,
+        5.199377026001457,
+        5.23727386999235,
+        5.230236400995636,
+        5.632525695997174
+      ],
+      "median": 5.230236400995636,
+      "mean": 5.30390747319907,
+      "stdev": 0.16480511070942908,
+      "cov": 0.031072395501278667,
+      "max_min_ratio": 1.0833078016519273,
+      "noisy": false
+    },
+    "coverage_strtree": {
+      "best": 4.787009539999417,
+      "runs": [
+        4.914274640992517,
+        4.811636297003133,
+        4.825340416995459,
+        4.904670554999029,
+        4.787009539999417
+      ],
+      "median": 4.825340416995459,
+      "mean": 4.848586289997911,
+      "stdev": 0.051298680239248724,
+      "cov": 0.01058013143853336,
+      "max_min_ratio": 1.026585512297332,
+      "noisy": false
+    },
+    "coverage_disjoint": {
+      "best": NaN,
+      "runs": [
+        NaN
+      ],
+      "median": NaN,
+      "mean": NaN,
+      "stdev": NaN,
+      "cov": NaN,
+      "max_min_ratio": NaN,
+      "noisy": false
+    },
+    "coverage_from_dicts": {
+      "best": 5.563565104996087,
+      "runs": [
+        5.563565104996087,
+        5.600776631996268,
+        5.6397397099935915,
+        5.607333951993496,
+        5.564506395996432
+      ],
+      "median": 5.600776631996268,
+      "mean": 5.595184358995175,
+      "stdev": 0.02865302799756705,
+      "cov": 0.0051210158877969085,
+      "max_min_ratio": 1.0136916893322772,
+      "noisy": false
+    },
+    "coverage_raster": {
+      "best": 3.753598602997954,
+      "runs": [
+        3.769052322008065,
+        3.7855577930022264,
+        3.976456895994488,
+        3.753598602997954,
+        4.310993427992798
+      ],
+      "median": 3.7855577930022264,
+      "mean": 3.9191318083991065,
+      "stdev": 0.21194754374299052,
+      "cov": 0.05408022850590657,
+      "max_min_ratio": 1.148496119044178,
+      "noisy": false
+    },
+    "folium_render_day": {
+      "best": 0.031874580003204755,
+      "runs": [
+        0.03946273200563155,
+        0.035835681002936326,
+        0.031874580003204755,
+        0.03667754100752063,
+        0.03331783499743324
+      ],
+      "median": 0.035835681002936326,
+      "mean": 0.0354336738033453,
+      "stdev": 0.0026490016209265834,
+      "cov": 0.07475944028915485,
+      "max_min_ratio": 1.2380628074680156,
+      "noisy": false
+    },
+    "load_streetlights": {
+      "best": 0.14876524500141386,
+      "runs": [
+        0.1610409599961713,
+        0.1537789189897012,
+        0.15699206599674653,
+        0.14876524500141386,
+        0.1528889640030684
+      ],
+      "median": 0.1537789189897012,
+      "mean": 0.15469323079742026,
+      "stdev": 0.004118511129010746,
+      "cov": 0.026623732064941966,
+      "max_min_ratio": 1.0825173581009513,
+      "noisy": false
+    },
+    "load_food": {
+      "best": 0.005572937996475957,
+      "runs": [
+        0.0056643710122443736,
+        0.005714051992981695,
+        0.005846093001309782,
+        0.005572937996475957,
+        0.005683716997737065
+      ],
+      "median": 0.005683716997737065,
+      "mean": 0.005696234200149775,
+      "stdev": 8.848619210546582e-05,
+      "cov": 0.01553415625065753,
+      "max_min_ratio": 1.049014542240835,
+      "noisy": false
+    },
+    "folium_render_night": {
+      "best": 0.17036200599977747,
+      "runs": [
+        0.17036200599977747,
+        0.22492029100249056,
+        0.1756997190095717,
+        0.1840652959945146,
+        0.1818102310062386
+      ],
+      "median": 0.1818102310062386,
+      "mean": 0.18737150860251858,
+      "stdev": 0.01937691286622993,
+      "cov": 0.10341440388002231,
+      "max_min_ratio": 1.3202491346737508,
+      "noisy": false
+    }
+  },
+  "counts": {
+    "buildings": 123105,
+    "shadows": 123105,
+    "streetlights": 80182,
+    "food": 3002,
+    "coverage_pct": 22.637
+  },
+  "memory_mb": {
+    "start": 169,
+    "after_load": 662,
+    "after_shadows": 925
+  },
+  "totals": {
+    "day_pipeline": 11.33,
+    "night_pipeline": 0.32
+  },
+  "preflight": {
+    "status": "warn",
+    "checks": [
+      {
+        "name": "load_1min",
+        "status": "pass",
+        "value": 0.42,
+        "detail": "load 0.42"
+      },
+      {
+        "name": "mem_available",
+        "status": "pass",
+        "value": 6834,
+        "detail": "6834 MB available, 5195 MB free"
+      },
+      {
+        "name": "swap_used",
+        "status": "pass",
+        "value": 0,
+        "detail": "0 MB swap used"
+      },
+      {
+        "name": "postgis_container",
+        "status": "pass",
+        "value": "running",
+        "detail": "lightmap-postgis is running"
+      },
+      {
+        "name": "postgis_data",
+        "status": "pass",
+        "value": 123105,
+        "detail": "buildings rows: 123,105"
+      },
+      {
+        "name": "top_processes",
+        "status": "warn",
+        "value": [
+          {
+            "pid": 708760,
+            "pcpu": 394.0,
+            "pmem": 1.4,
+            "comm": "python"
+          },
+          {
+            "pid": 678843,
+            "pcpu": 16.9,
+            "pmem": 5.2,
+            "comm": "claude"
+          },
+          {
+            "pid": 677369,
+            "pcpu": 3.5,
+            "pmem": 3.1,
+            "comm": "node"
+          },
+          {
+            "pid": 3341,
+            "pcpu": 2.3,
+            "pmem": 2.5,
+            "comm": "node"
+          },
+          {
+            "pid": 4338,
+            "pcpu": 0.9,
+            "pmem": 5.1,
+            "comm": "claude"
+          }
+        ],
+        "detail": "high-CPU neighbors: python(394%), claude(17%), node(4%)"
+      }
+    ],
+    "state": {
+      "load_1min": 0.42,
+      "load_5min": 0.5,
+      "load_15min": 0.63,
+      "mem_free_mb": 5195,
+      "mem_available_mb": 6834,
+      "mem_total_mb": 9945,
+      "swap_used_mb": 0,
+      "swap_total_mb": 4096
+    },
+    "top_processes": [
+      {
+        "pid": 708760,
+        "pcpu": 394.0,
+        "pmem": 1.4,
+        "comm": "python"
+      },
+      {
+        "pid": 678843,
+        "pcpu": 16.9,
+        "pmem": 5.2,
+        "comm": "claude"
+      },
+      {
+        "pid": 677369,
+        "pcpu": 3.5,
+        "pmem": 3.1,
+        "comm": "node"
+      },
+      {
+        "pid": 3341,
+        "pcpu": 2.3,
+        "pmem": 2.5,
+        "comm": "node"
+      },
+      {
+        "pid": 4338,
+        "pcpu": 0.9,
+        "pmem": 5.1,
+        "comm": "claude"
+      }
+    ]
+  },
+  "system_state": {
+    "start": {
+      "load_1min": 0.42,
+      "load_5min": 0.5,
+      "load_15min": 0.63,
+      "mem_free_mb": 5190,
+      "mem_available_mb": 6830,
+      "mem_total_mb": 9945,
+      "swap_used_mb": 0,
+      "swap_total_mb": 4096
+    },
+    "end": {
+      "load_1min": 2.2,
+      "load_5min": 1.42,
+      "load_15min": 0.98,
+      "mem_free_mb": 4446,
+      "mem_available_mb": 6087,
+      "mem_total_mb": 9945,
+      "swap_used_mb": 0,
+      "swap_total_mb": 4096
+    }
+  },
+  "reliability": {
+    "noisy_stages": [],
+    "noisy_stage_count": 0,
+    "load_drift_1min": 1.7800000000000002,
+    "mem_available_drift_mb": 743,
+    "preflight_status": "warn"
+  }
+}

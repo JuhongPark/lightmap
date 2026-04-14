@@ -1,0 +1,378 @@
+{
+  "label": "step4b-feature-vectorize",
+  "timestamp": "2026-04-14T01:37:43.675559+00:00",
+  "config": {
+    "scale_pct": 100,
+    "runs": 5,
+    "warmup": 1,
+    "day_time_iso": "2025-07-15T14:00:00-04:00",
+    "night_time_iso": "2025-07-15T22:00:00-04:00",
+    "include_disjoint": false,
+    "raster_resolution_m": 10.0,
+    "coverage_grid_cells": 50
+  },
+  "environment": {
+    "cpu": "12th Gen Intel(R) Core(TM) i3-1220P",
+    "cores": 12,
+    "ram_mb": 9945,
+    "os": "Ubuntu 24.04.4 LTS",
+    "kernel": "6.6.87.2-microsoft-standard-WSL2",
+    "python": "3.12.3",
+    "shapely": "2.1.2",
+    "numpy": "2.4.4",
+    "folium": "0.20.0",
+    "rasterio": "1.5.0",
+    "psycopg2": "2.9.9 (dt dec pq3 ext lo64)",
+    "postgis": "3.4.3",
+    "postgis_enabled": true
+  },
+  "git": {
+    "commit": "af946a6",
+    "branch": "main",
+    "dirty": true
+  },
+  "stages": {
+    "load_buildings": {
+      "best": 3.0686473559908336,
+      "runs": [
+        3.0686473559908336,
+        3.716925271000946,
+        3.7535688990028575,
+        4.332335372004309,
+        4.986466472997563
+      ],
+      "median": 3.7535688990028575,
+      "mean": 3.971588674199302,
+      "stdev": 0.6461894802461804,
+      "cov": 0.1627030222046991,
+      "max_min_ratio": 1.624972143919576,
+      "noisy": true
+    },
+    "shadow_projection": {
+      "best": 5.675426027999492,
+      "runs": [
+        7.793860011996003,
+        5.675426027999492,
+        7.318727561010746,
+        10.040940129008959,
+        8.790529960999265
+      ],
+      "median": 7.793860011996003,
+      "mean": 7.9238967382028935,
+      "stdev": 1.4609370745681474,
+      "cov": 0.1843710390021415,
+      "max_min_ratio": 1.769195841769829,
+      "noisy": true
+    },
+    "coverage_strtree": {
+      "best": 7.640240988999722,
+      "runs": [
+        8.808618352006306,
+        9.506167603001813,
+        9.420939743999043,
+        9.532768271004898,
+        7.640240988999722
+      ],
+      "median": 9.420939743999043,
+      "mean": 8.981746991802357,
+      "stdev": 0.7212688240372032,
+      "cov": 0.08030384564333704,
+      "max_min_ratio": 1.2477051816467573,
+      "noisy": false
+    },
+    "coverage_disjoint": {
+      "best": NaN,
+      "runs": [
+        NaN
+      ],
+      "median": NaN,
+      "mean": NaN,
+      "stdev": NaN,
+      "cov": NaN,
+      "max_min_ratio": NaN,
+      "noisy": false
+    },
+    "coverage_from_dicts": {
+      "best": 9.893708656003582,
+      "runs": [
+        13.048278324989951,
+        10.838796428986825,
+        10.968556185995112,
+        11.026749705997645,
+        9.893708656003582
+      ],
+      "median": 10.968556185995112,
+      "mean": 11.155217860394623,
+      "stdev": 1.032138805104735,
+      "cov": 0.09252520372275566,
+      "max_min_ratio": 1.318846024142034,
+      "noisy": false
+    },
+    "coverage_raster": {
+      "best": 5.797750764002558,
+      "runs": [
+        5.797750764002558,
+        5.8964924159954535,
+        5.923247707993141,
+        6.701244768002653,
+        11.975565157990786
+      ],
+      "median": 5.923247707993141,
+      "mean": 7.2588601627969185,
+      "stdev": 2.3804616410434107,
+      "cov": 0.3279387655438995,
+      "max_min_ratio": 2.0655536337204135,
+      "noisy": true
+    },
+    "coverage_pil": {
+      "best": 1.0958205539936898,
+      "runs": [
+        1.2336968470044667,
+        1.1385901690082392,
+        1.1746794170030626,
+        1.0958205539936898,
+        1.1319544400030281
+      ],
+      "median": 1.1385901690082392,
+      "mean": 1.1549482854024973,
+      "stdev": 0.046654146714719485,
+      "cov": 0.04039500928689686,
+      "max_min_ratio": 1.1258201377116812,
+      "noisy": false
+    },
+    "folium_render_day": {
+      "best": 0.04243318299995735,
+      "runs": [
+        0.05075472500175238,
+        0.04243318299995735,
+        0.05500168399885297,
+        0.05005512898787856,
+        0.04725910800334532
+      ],
+      "median": 0.05005512898787856,
+      "mean": 0.049100765798357315,
+      "stdev": 0.004154890842378335,
+      "cov": 0.08461967496477088,
+      "max_min_ratio": 1.296195102755036,
+      "noisy": false
+    },
+    "load_streetlights": {
+      "best": 0.19581159300287254,
+      "runs": [
+        0.20684153800539207,
+        0.19581159300287254,
+        0.23703773200395517,
+        0.3206723329931265,
+        0.2440434180025477
+      ],
+      "median": 0.23703773200395517,
+      "mean": 0.24088132280157878,
+      "stdev": 0.04377525519461041,
+      "cov": 0.18172955331480561,
+      "max_min_ratio": 1.6376575466010443,
+      "noisy": true
+    },
+    "load_food": {
+      "best": 0.008289268997032195,
+      "runs": [
+        0.010227937003946863,
+        0.008289268997032195,
+        0.009271563991205767,
+        0.008555890002753586,
+        0.021244565999950282
+      ],
+      "median": 0.009271563991205767,
+      "mean": 0.01151784519897774,
+      "stdev": 0.004909493310562255,
+      "cov": 0.42625102401949233,
+      "max_min_ratio": 2.5628998175299254,
+      "noisy": true
+    },
+    "folium_render_night": {
+      "best": 0.2425204000028316,
+      "runs": [
+        0.5162740850064438,
+        0.2681090050027706,
+        0.2425204000028316,
+        0.3032603659958113,
+        0.3550552369997604
+      ],
+      "median": 0.3032603659958113,
+      "mean": 0.33704381860152355,
+      "stdev": 0.09723775650202528,
+      "cov": 0.2885018242004505,
+      "max_min_ratio": 2.128786217573515,
+      "noisy": true
+    }
+  },
+  "counts": {
+    "buildings": 123105,
+    "shadows": 123105,
+    "streetlights": 80182,
+    "food": 3002,
+    "coverage_pct": 22.637,
+    "coverage_pct_raster": 22.656,
+    "coverage_pct_pil": 22.557,
+    "coverage_delta_pil_vs_strtree": -0.08
+  },
+  "memory_mb": {
+    "start": 173,
+    "after_load": 666,
+    "after_shadows": 972
+  },
+  "totals": {
+    "day_pipeline": 6.81,
+    "day_pipeline_full": 9.88,
+    "night_pipeline": 0.45
+  },
+  "preflight": {
+    "status": "warn",
+    "checks": [
+      {
+        "name": "load_1min",
+        "status": "warn",
+        "value": 1.2,
+        "detail": "load 1.20 exceeds 1.00; other processes are using the CPU"
+      },
+      {
+        "name": "mem_available",
+        "status": "pass",
+        "value": 4355,
+        "detail": "4355 MB available, 2222 MB free"
+      },
+      {
+        "name": "swap_used",
+        "status": "pass",
+        "value": 0,
+        "detail": "0 MB swap used"
+      },
+      {
+        "name": "postgis_container",
+        "status": "pass",
+        "value": "running",
+        "detail": "lightmap-postgis is running"
+      },
+      {
+        "name": "postgis_data",
+        "status": "pass",
+        "value": 123105,
+        "detail": "buildings rows: 123,105"
+      },
+      {
+        "name": "top_processes",
+        "status": "warn",
+        "value": [
+          {
+            "pid": 838495,
+            "pcpu": 348.0,
+            "pmem": 1.4,
+            "comm": "python"
+          },
+          {
+            "pid": 775890,
+            "pcpu": 29.9,
+            "pmem": 5.0,
+            "comm": "claude"
+          },
+          {
+            "pid": 678843,
+            "pcpu": 25.6,
+            "pmem": 6.1,
+            "comm": "claude"
+          },
+          {
+            "pid": 781390,
+            "pcpu": 23.1,
+            "pmem": 5.0,
+            "comm": "claude"
+          },
+          {
+            "pid": 733720,
+            "pcpu": 16.4,
+            "pmem": 4.9,
+            "comm": "claude"
+          }
+        ],
+        "detail": "high-CPU neighbors: python(348%), claude(30%), claude(26%)"
+      }
+    ],
+    "state": {
+      "load_1min": 1.2,
+      "load_5min": 3.11,
+      "load_15min": 3.31,
+      "mem_free_mb": 2222,
+      "mem_available_mb": 4355,
+      "mem_total_mb": 9945,
+      "swap_used_mb": 0,
+      "swap_total_mb": 4096
+    },
+    "top_processes": [
+      {
+        "pid": 838495,
+        "pcpu": 348.0,
+        "pmem": 1.4,
+        "comm": "python"
+      },
+      {
+        "pid": 775890,
+        "pcpu": 29.9,
+        "pmem": 5.0,
+        "comm": "claude"
+      },
+      {
+        "pid": 678843,
+        "pcpu": 25.6,
+        "pmem": 6.1,
+        "comm": "claude"
+      },
+      {
+        "pid": 781390,
+        "pcpu": 23.1,
+        "pmem": 5.0,
+        "comm": "claude"
+      },
+      {
+        "pid": 733720,
+        "pcpu": 16.4,
+        "pmem": 4.9,
+        "comm": "claude"
+      }
+    ]
+  },
+  "system_state": {
+    "start": {
+      "load_1min": 1.2,
+      "load_5min": 3.11,
+      "load_15min": 3.31,
+      "mem_free_mb": 2213,
+      "mem_available_mb": 4347,
+      "mem_total_mb": 9945,
+      "swap_used_mb": 0,
+      "swap_total_mb": 4096
+    },
+    "end": {
+      "load_1min": 3.71,
+      "load_5min": 3.95,
+      "load_15min": 3.68,
+      "mem_free_mb": 1368,
+      "mem_available_mb": 3504,
+      "mem_total_mb": 9945,
+      "swap_used_mb": 0,
+      "swap_total_mb": 4096
+    }
+  },
+  "reliability": {
+    "noisy_stages": [
+      "load_buildings",
+      "shadow_projection",
+      "coverage_raster",
+      "load_streetlights",
+      "load_food",
+      "folium_render_night"
+    ],
+    "noisy_stage_count": 6,
+    "load_drift_1min": 2.51,
+    "mem_available_drift_mb": 843,
+    "preflight_status": "warn"
+  }
+}
