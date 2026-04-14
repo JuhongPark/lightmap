@@ -360,9 +360,15 @@ def _load_buildings_and_shadows(scale_pct, target_time):
 # ---------------------------------------------------------------------------
 
 def _create_base_map(tiles="CartoDB positron"):
+    # prefer_canvas=True switches Leaflet to Canvas rendering instead of
+    # SVG. SVG is fine for hundreds of polygons but chokes on the 123K
+    # shadow polygons we render at 100% scale, where every feature becomes
+    # a DOM node. Canvas draws them into a single <canvas> element, so
+    # the browser handles the map smoothly even at the full city scale.
     m = folium.Map(
         location=MAP_CENTER, zoom_start=14, tiles=tiles,
         width="100%", height="100%",
+        prefer_canvas=True,
     )
     m.get_root().html.add_child(folium.Element(
         "<style>html,body{margin:0;padding:0;height:100%;width:100%}</style>"
@@ -398,6 +404,17 @@ def _make_shadow_cmap():
 
 
 def _add_shadow_layer(m, shadows, cmap):
+    # When folium embeds a FeatureCollection inline it writes every feature
+    # into one giant JSON string literal inside the output HTML. At 123K
+    # shadows that line is ~32 MB and browsers hang parsing it. Instead,
+    # for large shadow sets we write the GeoJSON to a sibling file and
+    # inject a tiny Leaflet snippet that fetches it asynchronously after
+    # the base map has rendered. The HTML stays small and the browser can
+    # show tiles immediately.
+    if len(shadows) > 5000:
+        _add_shadow_layer_async(m, shadows, cmap)
+        return
+
     folium.GeoJson(
         {"type": "FeatureCollection", "features": shadows},
         name="Shadows",
@@ -417,6 +434,84 @@ def _add_shadow_layer(m, shadows, cmap):
             style="font-size:12px;",
         ),
     ).add_to(m)
+
+
+def _shadow_color_stops_for_js(cmap):
+    """Convert a branca LinearColormap into a plain JS-usable stop table.
+
+    Returns a list of (threshold_ft, '#rrggbb') tuples sorted ascending,
+    matching how branca interpolates colors. The browser-side style_fn
+    uses this to pick a color per feature without depending on branca.
+    """
+    stops = []
+    for i, color in enumerate(SHADOW_CMAP_COLORS):
+        t = (cmap.vmax - cmap.vmin) * i / (len(SHADOW_CMAP_COLORS) - 1) + cmap.vmin
+        stops.append((round(t, 1), color))
+    return stops
+
+
+def _add_shadow_layer_async(m, shadows, cmap):
+    """Write shadow FeatureCollection to a side file and fetch it async.
+
+    Skips folium's inline-embedding code path entirely. Writes the
+    features as compact JSON (no extra whitespace), constructs the layer
+    in raw Leaflet, and relies on `prefer_canvas=True` on the base map so
+    the 123K features go to a single <canvas> element instead of the
+    DOM.
+    """
+    sidecar_name = "shadows.geojson"
+    sidecar_path = os.path.join(OUT_DIR, sidecar_name)
+    with open(sidecar_path, "w") as f:
+        json.dump(
+            {"type": "FeatureCollection", "features": shadows},
+            f,
+            separators=(",", ":"),
+        )
+
+    stops = _shadow_color_stops_for_js(cmap)
+    stops_js = json.dumps(stops)
+    map_var = m.get_name()
+
+    script_html = f"""
+<script>
+(function() {{
+  var stops = {stops_js};
+  function colorFor(h) {{
+    for (var i = stops.length - 1; i >= 0; i--) {{
+      if (h >= stops[i][0]) return stops[i][1];
+    }}
+    return stops[0][1];
+  }}
+  function styleFn(feature) {{
+    var h = (feature.properties && feature.properties.height_ft) || 0;
+    var c = colorFor(h);
+    return {{
+      fillColor: c, color: c, weight: 0.3, fillOpacity: 0.45
+    }};
+  }}
+  function addShadows() {{
+    if (typeof {map_var} === 'undefined') {{
+      setTimeout(addShadows, 50);
+      return;
+    }}
+    fetch('{sidecar_name}')
+      .then(function(r) {{ return r.json(); }})
+      .then(function(data) {{
+        L.geoJSON(data, {{ style: styleFn }}).addTo({map_var});
+      }})
+      .catch(function(err) {{
+        console.error('failed to load shadows:', err);
+      }});
+  }}
+  if (document.readyState === 'complete') {{
+    addShadows();
+  }} else {{
+    window.addEventListener('load', addShadows);
+  }}
+}})();
+</script>
+"""
+    m.get_root().html.add_child(folium.Element(script_html))
 
 
 def _add_streetlight_layer(m, coords):
