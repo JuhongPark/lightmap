@@ -159,24 +159,52 @@ def main() -> int:
         for run_idx in range(args.runs):
             label = f"{strategy}_r{run_idx + 1}" if args.runs > 1 else strategy
             print(f"\n[bench] verify {label} -> {url}")
-            res = verify_run(
-                url=url,
-                label=f"suite_{strategy}",
-                viewport_w=1280,
-                viewport_h=800,
-                timeout_ms=args.timeout,
-                # r0-inline-svg and r1-inline-canvas don't run the
-                # __lightmap harness; they embed features inline and
-                # there's no fetchEnd / addedAt to wait on.
-                wait_for_shadows=(
-                    RENDER_STRATEGIES[strategy]["shadow_mode"] != "inline"
-                ),
-                hide_onboarding=True,
-            )
-            res_dict = asdict(res)
-            res_dict["strategy"] = strategy
-            res_dict["label"] = strategy
-            res_dict["run_idx"] = run_idx
+            # Inline strategies (r0/r1) can legitimately hang the browser
+            # on this dataset; cap their timeout tighter so a failure is
+            # recorded within a reasonable time and the suite moves on.
+            strat_timeout = args.timeout
+            if RENDER_STRATEGIES[strategy]["shadow_mode"] == "inline":
+                strat_timeout = min(args.timeout, 60000)
+            try:
+                res = verify_run(
+                    url=url,
+                    label=f"suite_{strategy}",
+                    viewport_w=1280,
+                    viewport_h=800,
+                    timeout_ms=strat_timeout,
+                    # Inline strategies embed features; no __lightmap
+                    # harness to wait on.
+                    wait_for_shadows=(
+                        RENDER_STRATEGIES[strategy]["shadow_mode"] != "inline"
+                    ),
+                    hide_onboarding=True,
+                )
+                res_dict = asdict(res)
+                res_dict["strategy"] = strategy
+                res_dict["label"] = strategy
+                res_dict["run_idx"] = run_idx
+                res_dict["fatal_error"] = None
+            except Exception as e:
+                # Record the failure, still produce a row in the suite
+                # table so "this strategy does not render" is visible.
+                print(f"[bench] {strategy} failed: {type(e).__name__}: {e}")
+                res_dict = {
+                    "strategy": strategy,
+                    "label": strategy,
+                    "run_idx": run_idx,
+                    "ok": False,
+                    "url": url,
+                    "lightmap": {},
+                    "dom_summary": {},
+                    "errors": [f"{type(e).__name__}: {e}"],
+                    "requests_failed": [],
+                    "console": [],
+                    "screenshots": {},
+                    "viewport": {"width": 1280, "height": 800},
+                    "timings": {},
+                    "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                    "fatal_error": f"{type(e).__name__}: {e}",
+                }
             lm = res_dict.get("lightmap") or {}
             added = lm.get("addedAt")
             if (best_result is None) or (
