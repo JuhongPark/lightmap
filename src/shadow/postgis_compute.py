@@ -128,29 +128,42 @@ def compute_all_shadows_postgis(conn, dt, cities=None, sample_pct=100,
         return [], altitude, azimuth
 
     # v7c: batch WKB decode via shapely.from_wkb (C-side, GIL released)
-    wkb_list = [bytes(r[2]) for r in rows if r[2] is not None]
-    polygons = shapely.from_wkb(wkb_list).tolist()
+    # Filter out null WKB up front so every downstream array stays aligned
+    # with the metadata list.
+    valid = [(r[0], r[1], r[2]) for r in rows if r[2] is not None]
+    wkb_list = [bytes(r[2]) for r in valid]
+    polygons_arr = shapely.from_wkb(wkb_list)
 
-    # Simplify shadow geometries to cut vertex count in half. Shadows are
-    # already convex hulls so they can be safely simplified without visual
-    # artifacts. 5e-5 degrees is about 5.5 meters at this latitude, well
-    # below rendering pixel size at any sensible map zoom level.
-    simplified = shapely.simplify(polygons, 5e-5, preserve_topology=True).tolist()
+    # Simplify shadow geometries to cut vertex count. Shadows are convex
+    # hulls of building + translated building, and that hull can carry
+    # 10-20+ vertices on complex buildings. Simplifying at 5e-5 deg (~5.5m)
+    # cuts the per-polygon work downstream (coverage stages + HTML size)
+    # by more than the 0.3-0.5s the simplify itself costs.
+    simplified_arr = shapely.simplify(polygons_arr, 5e-5, preserve_topology=True)
 
-    # Build features with direct coord access and rounded coordinates.
-    # 6 decimal places is ~11 cm of ground precision, imperceptible on a map.
-    features = []
-    for i, (height_ft, shadow_m, wkb_bytes) in enumerate(rows):
-        if wkb_bytes is None:
-            continue
-        poly = simplified[i]
-        if poly.is_empty:
-            continue
-        coords = [
-            (round(x, 6), round(y, 6))
-            for x, y in poly.exterior.coords
-        ]
-        features.append({
+    # Drop rows whose simplified result collapsed to empty. Everything below
+    # keeps parallel alignment between the metadata arrays and the numpy
+    # coordinate array.
+    empty_mask = shapely.is_empty(simplified_arr)
+    keep = ~empty_mask
+    simplified_arr = simplified_arr[keep]
+    valid_kept = [(m[0], m[1]) for m, k in zip(valid, keep) if k]
+
+    # Batch coord extraction: one C call into GEOS produces a flat (N, 2)
+    # ndarray of every vertex across every polygon, and a parallel int
+    # array of per-polygon vertex counts lets us slice it without a Python
+    # loop over vertices.
+    flat_coords = shapely.get_coordinates(simplified_arr)
+    np.round(flat_coords, 6, out=flat_coords)
+    vertex_counts = shapely.get_num_coordinates(simplified_arr)
+    split_points = np.cumsum(vertex_counts)[:-1]
+    per_poly_coords = np.split(flat_coords, split_points)
+
+    # Build features. The only per-row Python work left is wrapping the
+    # numpy slice with a GeoJSON-shaped dict, which is unavoidable because
+    # folium and consumers expect this shape.
+    features = [
+        {
             "type": "Feature",
             "properties": {
                 "height_ft": round(float(height_ft), 1),
@@ -158,13 +171,19 @@ def compute_all_shadows_postgis(conn, dt, cities=None, sample_pct=100,
             },
             "geometry": {
                 "type": "Polygon",
-                "coordinates": [coords],
+                "coordinates": [coords.tolist()],
             },
-        })
+        }
+        for (height_ft, shadow_m), coords in zip(valid_kept, per_poly_coords)
+    ]
 
     if return_polygons:
-        return features, polygons, altitude, azimuth
+        # Coverage uses the raw (unsimplified) hull polygons to preserve
+        # area accuracy. Any simplification here would erode small shadows
+        # and shift the coverage number (see v4 correctness fix).
+        return features, polygons_arr.tolist(), altitude, azimuth
     return features, altitude, azimuth
+
 
 
 def compute_shadow_coverage_postgis(conn, dt):
@@ -238,28 +257,41 @@ def load_buildings_postgis(conn):
     c.close()
 
     wkb_list = [bytes(r[1]) for r in rows]
-    polygons = shapely.from_wkb(wkb_list).tolist()
+    polygons_arr = shapely.from_wkb(wkb_list)
 
     # Also simplify the building geometries used for the rendered folium
     # layer. Shadows are computed from the unsimplified polygons above to
     # preserve accuracy.
-    simplified = shapely.simplify(polygons, 5e-5, preserve_topology=True).tolist()
+    simplified_arr = shapely.simplify(polygons_arr, 5e-5, preserve_topology=True)
 
-    features = []
-    parsed = []
-    for i, (height_ft, _wkb) in enumerate(rows):
-        parsed.append((polygons[i], float(height_ft)))
-        disp_poly = simplified[i] if not simplified[i].is_empty else polygons[i]
-        coords = [
-            (round(x, 6), round(y, 6))
-            for x, y in disp_poly.exterior.coords
-        ]
-        features.append({
+    # Pick simplified, but fall back to the original for polygons that
+    # simplify degenerates to empty. This preserves v5 behaviour.
+    empty_mask = shapely.is_empty(simplified_arr)
+    display_arr = np.where(empty_mask, polygons_arr, simplified_arr)
+
+    # Batch coord extraction: one C call into GEOS produces a flat (N, 2)
+    # ndarray of every vertex across every polygon, and a parallel int
+    # array of per-polygon vertex counts lets us slice it without a Python
+    # loop over vertices.
+    flat_coords = shapely.get_coordinates(display_arr)
+    np.round(flat_coords, 6, out=flat_coords)
+    vertex_counts = shapely.get_num_coordinates(display_arr)
+    split_points = np.cumsum(vertex_counts)[:-1]
+    per_poly_coords = np.split(flat_coords, split_points)
+
+    heights = [float(r[0]) for r in rows]
+    polygons = polygons_arr.tolist()
+    parsed = list(zip(polygons, heights))
+
+    features = [
+        {
             "type": "Feature",
-            "properties": {"BLDG_HGT_2010": round(float(height_ft), 1)},
+            "properties": {"BLDG_HGT_2010": round(h, 1)},
             "geometry": {
                 "type": "Polygon",
-                "coordinates": [coords],
+                "coordinates": [coords.tolist()],
             },
-        })
+        }
+        for h, coords in zip(heights, per_poly_coords)
+    ]
     return {"type": "FeatureCollection", "features": features}, parsed

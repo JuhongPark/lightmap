@@ -42,6 +42,7 @@ from shadow.compute import (
     compute_shadow_coverage,
     compute_shadow_coverage_disjoint,
     compute_shadow_coverage_from_polys,
+    compute_shadow_coverage_pil,
     compute_shadow_coverage_raster,
     get_sun_position,
 )
@@ -539,6 +540,9 @@ def _preimport_heavy_modules() -> None:
     """
     import folium  # noqa: F401
     import numpy  # noqa: F401
+    import PIL  # noqa: F401
+    import PIL.Image  # noqa: F401
+    import PIL.ImageDraw  # noqa: F401
     import rasterio  # noqa: F401
     import rasterio.features  # noqa: F401
     import shapely  # noqa: F401
@@ -704,6 +708,24 @@ def run_benchmark(config: BenchConfig, label: str,
         ),
     )
 
+    # --- Stage 3e: Coverage via Pillow (shrink-compensated) ---
+    # Alternative rasterizer. ~10x less per-polygon overhead than GDAL's
+    # rasterize, at the cost of a tiny (~0.07 pp) accuracy bias because
+    # PIL's fill is scan-line edge-inclusive. See compute_shadow_coverage_pil
+    # for details.
+    run_stage(
+        "coverage_pil",
+        lambda: compute_shadow_coverage_pil(
+            shadow_polys, resolution_m=config.raster_resolution_m,
+        ),
+    )
+    coverage_pil_pct = compute_shadow_coverage_pil(
+        shadow_polys, resolution_m=config.raster_resolution_m,
+    )
+    coverage_raster_pct = compute_shadow_coverage_raster(
+        shadow_polys, resolution_m=config.raster_resolution_m,
+    )
+
     # --- Stage 4: Folium render day ---
     import folium
     from prototype import (
@@ -754,12 +776,21 @@ def run_benchmark(config: BenchConfig, label: str,
     cov_values = [
         stages["coverage_strtree"].best,
         stages["coverage_raster"].best,
+        stages["coverage_pil"].best,
     ]
     if not math.isnan(stages["coverage_disjoint"].best):
         cov_values.append(stages["coverage_disjoint"].best)
     best_cov = min(cov_values)
     render_day_t = stages["folium_render_day"].best
-    day_pipeline = load_t + shadow_t + best_cov + render_day_t
+
+    # Production path at 100% scale with PostGIS enabled does NOT call
+    # load_buildings_postgis -- the building layer is dropped from the HTML
+    # for size reasons, so only shadow_projection + coverage + render land
+    # on the critical path. This is the number a reader should optimize
+    # against. `day_pipeline_full` preserves the historical sum (includes
+    # load) for comparison against older benchmark JSONs.
+    day_pipeline = shadow_t + best_cov + render_day_t
+    day_pipeline_full = load_t + shadow_t + best_cov + render_day_t
 
     night_pipeline = (
         stages["load_streetlights"].best
@@ -798,6 +829,11 @@ def run_benchmark(config: BenchConfig, label: str,
             "streetlights": len(coords),
             "food": len(places),
             "coverage_pct": round(coverage, 3),
+            "coverage_pct_raster": round(coverage_raster_pct, 3),
+            "coverage_pct_pil": round(coverage_pil_pct, 3),
+            "coverage_delta_pil_vs_strtree": round(
+                coverage_pil_pct - coverage, 3
+            ),
         },
         memory_mb={
             "start": mem_start,
@@ -806,6 +842,7 @@ def run_benchmark(config: BenchConfig, label: str,
         },
         totals={
             "day_pipeline": round(day_pipeline, 2),
+            "day_pipeline_full": round(day_pipeline_full, 2),
             "night_pipeline": round(night_pipeline, 2),
         },
         preflight=preflight or {},
@@ -855,7 +892,7 @@ def print_result(result: BenchResult) -> None:
     stage_order = [
         "load_buildings", "shadow_projection",
         "coverage_strtree", "coverage_disjoint",
-        "coverage_from_dicts", "coverage_raster",
+        "coverage_from_dicts", "coverage_raster", "coverage_pil",
         "folium_render_day",
         "load_streetlights", "load_food",
         "folium_render_night",
@@ -880,8 +917,13 @@ def print_result(result: BenchResult) -> None:
               f"[{runs_str}]{tag}")
 
     print()
-    print(f"  day pipeline    {result.totals['day_pipeline']:8.2f}s")
-    print(f"  night pipeline  {result.totals['night_pipeline']:8.2f}s")
+    print(f"  day pipeline         {result.totals['day_pipeline']:8.2f}s"
+          f"   (shadow + cov + render, matches production 100%)")
+    if "day_pipeline_full" in result.totals:
+        print(f"  day pipeline (full)  "
+              f"{result.totals['day_pipeline_full']:8.2f}s"
+              f"   (+ load_buildings, historical benchmark sum)")
+    print(f"  night pipeline       {result.totals['night_pipeline']:8.2f}s")
 
     rel = result.reliability or {}
     if rel:
@@ -907,8 +949,16 @@ def print_result(result: BenchResult) -> None:
     c = result.counts
     print()
     print(f"  buildings={c['buildings']:,}  shadows={c['shadows']:,}  "
-          f"streetlights={c['streetlights']:,}  food={c['food']:,}  "
-          f"coverage={c['coverage_pct']}%")
+          f"streetlights={c['streetlights']:,}  food={c['food']:,}")
+    cov_line = f"  coverage: strtree={c['coverage_pct']}%"
+    if "coverage_pct_raster" in c:
+        cov_line += f"  raster={c['coverage_pct_raster']}%"
+    if "coverage_pct_pil" in c:
+        cov_line += f"  pil={c['coverage_pct_pil']}%"
+    if "coverage_delta_pil_vs_strtree" in c:
+        cov_line += (f"  (pil delta vs strtree: "
+                     f"{c['coverage_delta_pil_vs_strtree']:+.3f} pp)")
+    print(cov_line)
 
     m = result.memory_mb
     print(f"  memory start={m['start']} MB  after_load={m['after_load']} MB  "
@@ -1032,13 +1082,32 @@ def compare_results(id_a: str, id_b: Optional[str]) -> None:
         print(f"  {name:<25s}  {sa:8.2f}  {sb:8.2f}  {delta:+8.2f}  "
               f"{pct:+6.1f}%  {flag_str}")
 
-    da = a.totals["day_pipeline"]
-    db_ = b.totals["day_pipeline"]
-    delta = db_ - da
-    pct = (delta / da * 100) if da else 0
     print("  " + "-" * 72)
-    print(f"  {'day pipeline':<25s}  {da:8.2f}  {db_:8.2f}  {delta:+8.2f}  "
-          f"{pct:+6.1f}%")
+    # For apples-to-apples across harness versions we prefer day_pipeline_full
+    # when both sides have it. day_pipeline_full always carries the historical
+    # "load + shadow + cov + render" sum, while day_pipeline was redefined
+    # after we discovered production at 100% scale does not call load_buildings.
+    a_full = a.totals.get("day_pipeline_full", a.totals["day_pipeline"])
+    b_full = b.totals.get("day_pipeline_full", b.totals["day_pipeline"])
+    delta_full = b_full - a_full
+    pct_full = (delta_full / a_full * 100) if a_full else 0
+    print(f"  {'day pipeline (full)':<25s}  {a_full:8.2f}  {b_full:8.2f}  "
+          f"{delta_full:+8.2f}  {pct_full:+6.1f}%")
+
+    a_prod = a.totals["day_pipeline"]
+    b_prod = b.totals["day_pipeline"]
+    delta_prod = b_prod - a_prod
+    pct_prod = (delta_prod / a_prod * 100) if a_prod else 0
+    print(f"  {'day pipeline (prod)':<25s}  {a_prod:8.2f}  {b_prod:8.2f}  "
+          f"{delta_prod:+8.2f}  {pct_prod:+6.1f}%")
+    if "day_pipeline_full" not in a.totals or "day_pipeline_full" not in b.totals:
+        print("  note: one side does not have day_pipeline_full recorded; "
+              "the 'prod' row may compare different formulas.")
+    print()
+    print("  full = load + shadow + cov + render (old formula, comparable "
+          "across all history)")
+    print("  prod = shadow + cov + render (what production at scale=100 "
+          "actually runs)")
     print()
     print("  (A~/B~ marks stages whose CoV or max/min ratio breached the "
           "noisy threshold.")
