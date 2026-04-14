@@ -75,10 +75,10 @@ def print_suite_summary(results: list[dict]) -> None:
     hdr = (
         f"  {'strategy':<18s}  {'ok':>3s}  "
         f"{'fetch':>8s}  {'parse+add':>10s}  {'total':>8s}  "
-        f"{'canvas_nz%':>10s}  {'err':>4s}  notes"
+        f"{'shadow':>14s}  {'err':>4s}  notes"
     )
     print(hdr)
-    print("  " + "-" * 92)
+    print("  " + "-" * 96)
     for r in results:
         lm = r.get("lightmap") or {}
         fs = lm.get("fetchStart")
@@ -88,8 +88,11 @@ def print_suite_summary(results: list[dict]) -> None:
         parse_add = (added - fe) if (fe is not None and added is not None) else None
         total = added
 
-        # canvas nonzero percent
+        # Visual sanity: either we have a non-empty canvas overlay or
+        # a loaded image overlay. Canvas strategies fill nz_pct; image
+        # overlay strategies (r8) report img.
         nz_pct = None
+        shadow_visual = "-"
         dom = r.get("dom_summary") or {}
         oc = dom.get("overlay_canvas") or {}
         for c in (oc.get("canvases") or []):
@@ -98,23 +101,33 @@ def print_suite_summary(results: list[dict]) -> None:
             s = c.get("sampled", 0) or 0
             if s:
                 nz_pct = c.get("nonzero", 0) / s * 100
+                shadow_visual = f"cv {nz_pct:4.1f}%"
                 break
+        if nz_pct is None:
+            imgs = dom.get("overlay_images") or []
+            for im in imgs:
+                if im.get("complete") and im.get("naturalWidth", 0) > 0:
+                    shadow_visual = (
+                        f"img {im.get('naturalWidth')}x{im.get('naturalHeight')}"
+                    )
+                    break
         err_count = len(r.get("errors") or [])
         ok_str = "yes" if r.get("ok") else "no"
-        nz_str = f"{nz_pct:10.1f}" if nz_pct is not None else "         -"
         notes = ""
         if lm.get("status") and lm.get("status") != "done":
             notes = f"status={lm.get('status')}"
         if (r.get("requests_failed") or []):
             notes += (" " if notes else "") + f"failed={len(r['requests_failed'])}"
+        if r.get("fatal_error"):
+            notes = (notes + " " if notes else "") + "TIMEOUT"
         print(
             f"  {r['label']:<18s}  {ok_str:>3s}  "
             f"{_fmt_ms(fetch_dur)}  {_fmt_ms(parse_add)}  {_fmt_ms(total)}  "
-            f"{nz_str}  {err_count:>4d}  {notes}"
+            f"{shadow_visual:>14s}  {err_count:>4d}  {notes}"
         )
     print()
-    print("  fetch + parse+add + render overhead ≈ total")
-    print("  canvas_nz% = fraction of sampled overlay canvas pixels that are non-transparent")
+    print("  total  = addedAt (total ms from navigation start to shadow visible)")
+    print("  shadow = cv <pct%> (canvas nonzero sample) or img <WxH> (PNG overlay)")
     print()
 
 

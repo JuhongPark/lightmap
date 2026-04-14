@@ -1,0 +1,83 @@
+{
+  "label": "suite_r2-async",
+  "url": "http://localhost:8765/prototype_r2-async.html",
+  "timestamp": "2026-04-14T04:10:31.360435+00:00",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "timings": {
+    "navigation": {
+      "responseEnd": 6.200000002980232,
+      "domContentLoaded": 522,
+      "load": 639.8000000119209,
+      "duration": 639.8000000119209
+    }
+  },
+  "lightmap": {
+    "fetchStart": 639.1000000089407,
+    "fetchEnd": 1085.6000000089407,
+    "addedAt": 2384.300000011921,
+    "featureCount": 123105,
+    "status": "done"
+  },
+  "console": [
+    {
+      "type": "warning",
+      "text": "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+      "location": {
+        "url": "",
+        "lineNumber": 14,
+        "columnNumber": 0
+      }
+    }
+  ],
+  "errors": [],
+  "requests_failed": [],
+  "dom_summary": {
+    "canvas_count": 1,
+    "canvas_sizes": [
+      {
+        "w": 1536,
+        "h": 960
+      }
+    ],
+    "leaflet_panes": [
+      "leaflet-pane leaflet-map-pane",
+      "leaflet-pane leaflet-tile-pane",
+      "leaflet-pane leaflet-overlay-pane",
+      "leaflet-pane leaflet-shadow-pane",
+      "leaflet-pane leaflet-marker-pane",
+      "leaflet-pane leaflet-tooltip-pane",
+      "leaflet-pane leaflet-popup-pane",
+      "leaflet-pane leaflet-map-pane",
+      "leaflet-pane leaflet-tile-pane",
+      "leaflet-pane leaflet-overlay-pane",
+      "leaflet-pane leaflet-shadow-pane",
+      "leaflet-pane leaflet-marker-pane",
+      "leaflet-pane leaflet-tooltip-pane",
+      "leaflet-pane leaflet-popup-pane"
+    ],
+    "body_html_len": 93243,
+    "tile_layers": 26,
+    "svg_paths": 6,
+    "overlay_canvas": {
+      "found": 1,
+      "canvases": [
+        {
+          "w": 1536,
+          "h": 960,
+          "sampled": 5760,
+          "nonzero": 2158
+        }
+      ]
+    },
+    "overlay_images": []
+  },
+  "screenshots": {
+    "pre_shadows": "benchmarks/render/20260414_001031_suite_r2-async/pre_shadows.png",
+    "post_shadows": "benchmarks/render/20260414_001031_suite_r2-async/post_shadows.png",
+    "full_page": "benchmarks/render/20260414_001031_suite_r2-async/full_page.png"
+  },
+  "ok": true
+}

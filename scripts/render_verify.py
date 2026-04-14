@@ -225,6 +225,25 @@ def run(url: str, label: str, viewport_w: int, viewport_h: int,
         """)
         result.dom_summary["overlay_canvas"] = canvas_check
 
+        # Image overlay sanity: some strategies (r8 PNG overlay) render
+        # shadows as a single <img> in the overlayPane instead of a
+        # canvas. Capture image presence and loaded state so the
+        # summary can show "shadows are visible" for those too.
+        image_check = page.evaluate("""
+            () => {
+              const imgs = Array.from(document.querySelectorAll(
+                  '.leaflet-overlay-pane img.leaflet-image-layer'
+              ));
+              return imgs.map(i => ({
+                src: i.currentSrc || i.src,
+                naturalWidth: i.naturalWidth,
+                naturalHeight: i.naturalHeight,
+                complete: i.complete,
+              }));
+            }
+        """)
+        result.dom_summary["overlay_images"] = image_check
+
         # Second screenshot, after shadows (if any) and overlay removal.
         shot_post = os.path.join(out_dir, "post_shadows.png")
         page.screenshot(path=shot_post)
@@ -300,6 +319,13 @@ def print_summary(r: RenderResult) -> None:
                     print(f"    overlay[{i}]:      "
                           f"{c['w']}x{c['h']}  "
                           f"{c['nonzero']}/{total} nonzero ({pct:.1f}%)")
+        img_overlays = dom.get("overlay_images", []) or []
+        if img_overlays:
+            for i, im in enumerate(img_overlays):
+                src = (im.get("src") or "").split("/")[-1]
+                print(f"    img_overlay[{i}]:  "
+                      f"{im.get('naturalWidth', 0)}x{im.get('naturalHeight', 0)}  "
+                      f"{src}  complete={im.get('complete')}")
         print(f"  tile_layers loaded: {dom.get('tile_layers', 'n/a')}")
         print(f"  svg path count:     {dom.get('svg_paths', 'n/a')}")
     if r.errors:

@@ -30,6 +30,7 @@ from shadow.compute import (
     compute_shadow_coverage_raster,
     get_sun_position,
     parse_building_features,
+    render_shadows_png,
 )
 
 try:
@@ -416,6 +417,32 @@ RENDER_STRATEGIES = {
         "fade_in": True,
         "gzip_sidecar": True,
     },
+    "r6-chunked": {
+        "label": "r5 + requestAnimationFrame chunked addData (progressive)",
+        "prefer_canvas": True,
+        "shadow_mode": "async-preload",
+        "preload": True,
+        "fade_in": True,
+        "gzip_sidecar": True,
+        "chunked_add": True,
+    },
+    "r7-canvas-direct": {
+        "label": "custom CanvasLayer (naive latLng-per-vertex -- known slow)",
+        "prefer_canvas": True,
+        "shadow_mode": "async-preload",
+        "preload": True,
+        "fade_in": False,
+        "gzip_sidecar": True,
+        "canvas_direct": True,
+    },
+    "r8-png-overlay": {
+        "label": "server-side Pillow PNG + L.imageOverlay (no feature JS)",
+        "prefer_canvas": True,
+        "shadow_mode": "png-overlay",
+        "preload": False,
+        "fade_in": True,
+        "gzip_sidecar": False,
+    },
 }
 DEFAULT_RENDER_STRATEGY = "r4-fade"
 
@@ -474,15 +501,96 @@ def _add_shadow_layer(m, shadows, cmap, *, strategy=DEFAULT_RENDER_STRATEGY):
     """
     cfg = RENDER_STRATEGIES.get(strategy) or RENDER_STRATEGIES[DEFAULT_RENDER_STRATEGY]
 
-    if cfg["shadow_mode"] == "inline":
+    mode = cfg["shadow_mode"]
+    if mode == "inline":
         _add_shadow_layer_inline(m, shadows, cmap)
+    elif mode == "png-overlay":
+        _add_shadow_layer_png_overlay(m, shadows, cmap, fade_in=cfg["fade_in"])
     else:
         _add_shadow_layer_async(
             m, shadows, cmap,
             preload=cfg["preload"],
             fade_in=cfg["fade_in"],
             gzip_sidecar=cfg["gzip_sidecar"],
+            chunked_add=cfg.get("chunked_add", False),
+            canvas_direct=cfg.get("canvas_direct", False),
         )
+
+
+def _add_shadow_layer_png_overlay(m, shadows, cmap, *, fade_in=False):
+    """r8: rasterize shadows to a PNG server-side and add as L.imageOverlay.
+
+    Skips the entire client-side geometry parsing pipeline. The cost is
+    a fixed PNG decode (a few MB at most), one <img> in the DOM, and
+    Leaflet's built-in image overlay which is a single transform.
+    """
+    from shapely.geometry import shape as _shape
+
+    png_name = "shadows.png"
+    png_path = os.path.join(OUT_DIR, png_name)
+
+    # Parse the GeoJSON features back into shapely polygons. Not free at
+    # 123K features (~200 ms), but happens once at server build time
+    # and never on the client.
+    polys = []
+    for feat in shadows:
+        geom = feat.get("geometry") or {}
+        if geom.get("type") in ("Polygon", "MultiPolygon"):
+            try:
+                polys.append(_shape(geom))
+            except Exception:
+                continue
+
+    _W, _H, bounds = render_shadows_png(polys, png_path)
+
+    map_var = m.get_name()
+    # L.imageOverlay takes [[south, west], [north, east]].
+    bounds_js = json.dumps(bounds)
+    fade_css = (
+        "img.style.transition='opacity 300ms ease-out';"
+        "img.style.opacity='0';"
+        "requestAnimationFrame(function(){img.style.opacity='1';});"
+        if fade_in
+        else ""
+    )
+    script = f"""
+<script>
+(function() {{
+  window.__lightmap = {{
+    fetchStart: null,
+    fetchEnd: null,
+    addedAt: null,
+    featureCount: null,
+    status: 'pending',
+  }};
+  function mark(name) {{
+    window.__lightmap[name] = performance.now();
+  }}
+  function addOverlay() {{
+    if (typeof {map_var} === 'undefined') {{
+      setTimeout(addOverlay, 50);
+      return;
+    }}
+    window.__lightmap.status = 'fetching';
+    mark('fetchStart');
+    var layer = L.imageOverlay('{png_name}', {bounds_js}, {{
+      opacity: 1.0, interactive: false,
+    }});
+    layer.on('load', function() {{
+      mark('fetchEnd');
+      var img = layer.getElement && layer.getElement();
+      if (img) {{ {fade_css} }}
+      window.__lightmap.status = 'done';
+      mark('addedAt');
+    }});
+    layer.addTo({map_var});
+  }}
+  if (document.readyState === 'complete') {{ addOverlay(); }}
+  else {{ window.addEventListener('load', addOverlay); }}
+}})();
+</script>
+"""
+    m.get_root().html.add_child(folium.Element(script))
 
 
 def _add_shadow_layer_inline(m, shadows, cmap):
@@ -528,7 +636,8 @@ def _shadow_color_stops_for_js(cmap):
 
 
 def _add_shadow_layer_async(m, shadows, cmap, *, preload=False,
-                             fade_in=False, gzip_sidecar=False):
+                             fade_in=False, gzip_sidecar=False,
+                             chunked_add=False, canvas_direct=False):
     """Write shadow FeatureCollection to a side file and fetch it async.
 
     Skips folium's inline-embedding code path entirely. Writes the
@@ -607,6 +716,136 @@ def _add_shadow_layer_async(m, shadows, cmap, *, preload=False,
         else ""
     )
 
+    # Chunked addition: create an empty L.geoJSON layer up front, add it
+    # to the map, then addData() in batches under requestAnimationFrame.
+    # Total wall time is the same or slightly worse, but the user sees
+    # shadows materialize progressively instead of all at once at the
+    # end. __lightmap.addedAt fires on the last chunk.
+    chunked_js = f"""
+        var layer = L.geoJSON(null, {{ style: styleFn }}).addTo({map_var});
+        var feats = data.features || [];
+        var chunkSize = 4000;
+        var i = 0;
+        function pump() {{
+          if (i >= feats.length) {{
+            window.__lightmap.status = 'done';
+            mark('addedAt');{fade_in_js}
+            return;
+          }}
+          var end = Math.min(i + chunkSize, feats.length);
+          layer.addData({{
+            type: 'FeatureCollection',
+            features: feats.slice(i, end),
+          }});
+          i = end;
+          if (i === chunkSize) {{
+            // Report first visible chunk time so the harness can
+            // separate "first pixels" from "all pixels".
+            mark('firstChunkAt');
+          }}
+          requestAnimationFrame(pump);
+        }}
+        pump();
+    """
+
+    # Default: single L.geoJSON call with optional fade-in.
+    default_add_js = f"""
+        var layer = L.geoJSON(data, {{ style: styleFn }}).addTo({map_var});{fade_in_js}
+        window.__lightmap.status = 'done';
+        mark('addedAt');
+    """
+
+    # Custom CanvasLayer: skip L.Polygon entirely. We walk the flat
+    # coordinate array once, convert each vertex via latLngToContainerPoint
+    # inside the layer's draw callback, and issue moveTo/lineTo/fill calls
+    # directly to the layer's 2D context. This removes 123K per-feature
+    # allocations (one of the dominant costs in vanilla L.geoJSON).
+    canvas_direct_js = f"""
+        var LightmapCanvas = L.Layer.extend({{
+          initialize: function (features, stops) {{
+            this._features = features;
+            this._stops = stops;
+          }},
+          onAdd: function (map) {{
+            this._map = map;
+            var pane = map.getPanes().overlayPane;
+            if (!this._canvas) {{
+              this._canvas = L.DomUtil.create('canvas', 'lightmap-canvas');
+              pane.appendChild(this._canvas);
+            }}
+            map.on('moveend resize zoomend', this._reset, this);
+            this._reset();
+          }},
+          onRemove: function (map) {{
+            if (this._canvas && this._canvas.parentNode) {{
+              this._canvas.parentNode.removeChild(this._canvas);
+            }}
+            map.off('moveend resize zoomend', this._reset, this);
+          }},
+          _reset: function () {{
+            var map = this._map, size = map.getSize();
+            var topLeft = map.containerPointToLayerPoint([0, 0]);
+            L.DomUtil.setPosition(this._canvas, topLeft);
+            this._canvas.width = size.x;
+            this._canvas.height = size.y;
+            this._canvas.style.width = size.x + 'px';
+            this._canvas.style.height = size.y + 'px';
+            this._draw();
+          }},
+          _colorFor: function (h) {{
+            var stops = this._stops;
+            for (var i = stops.length - 1; i >= 0; i--) {{
+              if (h >= stops[i][0]) return stops[i][1];
+            }}
+            return stops[0][1];
+          }},
+          _draw: function () {{
+            if (!this._canvas) return;
+            var ctx = this._canvas.getContext('2d');
+            ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
+            ctx.globalAlpha = 0.45;
+            var map = this._map;
+            var feats = this._features;
+            var byColor = {{}};
+            // Group features by fill color so we minimize ctx state
+            // changes (one beginPath + fill per color).
+            for (var fi = 0; fi < feats.length; fi++) {{
+              var f = feats[fi];
+              var props = f.properties || {{}};
+              var c = this._colorFor(props.height_ft || 0);
+              (byColor[c] = byColor[c] || []).push(f);
+            }}
+            for (var color in byColor) {{
+              ctx.fillStyle = color;
+              ctx.beginPath();
+              var group = byColor[color];
+              for (var gi = 0; gi < group.length; gi++) {{
+                var coords = group[gi].geometry.coordinates[0];
+                if (!coords || !coords.length) continue;
+                var p0 = map.latLngToContainerPoint([coords[0][1], coords[0][0]]);
+                ctx.moveTo(p0.x, p0.y);
+                for (var ci = 1; ci < coords.length; ci++) {{
+                  var p = map.latLngToContainerPoint([coords[ci][1], coords[ci][0]]);
+                  ctx.lineTo(p.x, p.y);
+                }}
+                ctx.closePath();
+              }}
+              ctx.fill();
+            }}
+          }},
+        }});
+        var layer = new LightmapCanvas(data.features || [], stops).addTo({map_var});
+        window.__lightmap.status = 'done';
+        mark('addedAt');
+    """
+
+    if canvas_direct:
+        add_path_js = canvas_direct_js
+    elif chunked_add:
+        add_path_js = chunked_js
+    else:
+        add_path_js = default_add_js
+
     script_html = f"""
 <script>
 (function() {{
@@ -655,9 +894,7 @@ def _add_shadow_layer_async(m, shadows, cmap, *, preload=False,
       .then(function(data) {{
         mark('fetchEnd');
         window.__lightmap.featureCount = (data && data.features) ? data.features.length : 0;
-        var layer = L.geoJSON(data, {{ style: styleFn }}).addTo({map_var});{fade_in_js}
-        window.__lightmap.status = 'done';
-        mark('addedAt');
+        {add_path_js}
       }})
       .catch(function(err) {{
         window.__lightmap.status = 'error';

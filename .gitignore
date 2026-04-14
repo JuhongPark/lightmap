@@ -217,6 +217,7 @@ data/
 # `.venv/bin/python src/prototype.py --scale 100`.
 docs/shadows.geojson
 docs/shadows.geojson.gz
+docs/shadows.png
 
 # Per-strategy HTML variants produced by render_bench.py. Each one is
 # 30 KB (async) or ~34 MB (inline), none of them should be committed.

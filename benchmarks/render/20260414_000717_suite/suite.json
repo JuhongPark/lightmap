@@ -1,0 +1,649 @@
+{
+  "timestamp": "20260414_000717",
+  "scale": 100,
+  "server_url": "http://localhost:8765",
+  "strategies": [
+    "r0-inline-svg",
+    "r1-inline-canvas",
+    "r2-async",
+    "r3-preload",
+    "r4-fade",
+    "r5-gzip",
+    "r6-chunked",
+    "r7-canvas-direct",
+    "r8-png-overlay"
+  ],
+  "results": [
+    {
+      "strategy": "r0-inline-svg",
+      "label": "r0-inline-svg",
+      "run_idx": 0,
+      "ok": false,
+      "url": "http://localhost:8765/prototype_r0-inline-svg.html",
+      "lightmap": {},
+      "dom_summary": {},
+      "errors": [
+        "TimeoutError: Page.goto: Timeout 60000ms exceeded.\nCall log:\n  - navigating to \"http://localhost:8765/prototype_r0-inline-svg.html\", waiting until \"load\"\n"
+      ],
+      "requests_failed": [],
+      "console": [],
+      "screenshots": {},
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "timings": {},
+      "timestamp": "2026-04-14T04:08:35.180120+00:00",
+      "fatal_error": "TimeoutError: Page.goto: Timeout 60000ms exceeded.\nCall log:\n  - navigating to \"http://localhost:8765/prototype_r0-inline-svg.html\", waiting until \"load\"\n"
+    },
+    {
+      "strategy": "r1-inline-canvas",
+      "label": "r1-inline-canvas",
+      "run_idx": 0,
+      "ok": false,
+      "url": "http://localhost:8765/prototype_r1-inline-canvas.html",
+      "lightmap": {},
+      "dom_summary": {},
+      "errors": [
+        "TimeoutError: Page.goto: Timeout 60000ms exceeded.\nCall log:\n  - navigating to \"http://localhost:8765/prototype_r1-inline-canvas.html\", waiting until \"load\"\n"
+      ],
+      "requests_failed": [],
+      "console": [],
+      "screenshots": {},
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "timings": {},
+      "timestamp": "2026-04-14T04:10:09.848606+00:00",
+      "fatal_error": "TimeoutError: Page.goto: Timeout 60000ms exceeded.\nCall log:\n  - navigating to \"http://localhost:8765/prototype_r1-inline-canvas.html\", waiting until \"load\"\n"
+    },
+    {
+      "label": "r2-async",
+      "url": "http://localhost:8765/prototype_r2-async.html",
+      "timestamp": "2026-04-14T04:10:31.360435+00:00",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "timings": {
+        "navigation": {
+          "responseEnd": 6.200000002980232,
+          "domContentLoaded": 522,
+          "load": 639.8000000119209,
+          "duration": 639.8000000119209
+        }
+      },
+      "lightmap": {
+        "fetchStart": 639.1000000089407,
+        "fetchEnd": 1085.6000000089407,
+        "addedAt": 2384.300000011921,
+        "featureCount": 123105,
+        "status": "done"
+      },
+      "console": [
+        {
+          "type": "warning",
+          "text": "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+          "location": {
+            "url": "",
+            "lineNumber": 14,
+            "columnNumber": 0
+          }
+        }
+      ],
+      "errors": [],
+      "requests_failed": [],
+      "dom_summary": {
+        "canvas_count": 1,
+        "canvas_sizes": [
+          {
+            "w": 1536,
+            "h": 960
+          }
+        ],
+        "leaflet_panes": [
+          "leaflet-pane leaflet-map-pane",
+          "leaflet-pane leaflet-tile-pane",
+          "leaflet-pane leaflet-overlay-pane",
+          "leaflet-pane leaflet-shadow-pane",
+          "leaflet-pane leaflet-marker-pane",
+          "leaflet-pane leaflet-tooltip-pane",
+          "leaflet-pane leaflet-popup-pane",
+          "leaflet-pane leaflet-map-pane",
+          "leaflet-pane leaflet-tile-pane",
+          "leaflet-pane leaflet-overlay-pane",
+          "leaflet-pane leaflet-shadow-pane",
+          "leaflet-pane leaflet-marker-pane",
+          "leaflet-pane leaflet-tooltip-pane",
+          "leaflet-pane leaflet-popup-pane"
+        ],
+        "body_html_len": 93243,
+        "tile_layers": 26,
+        "svg_paths": 6,
+        "overlay_canvas": {
+          "found": 1,
+          "canvases": [
+            {
+              "w": 1536,
+              "h": 960,
+              "sampled": 5760,
+              "nonzero": 2158
+            }
+          ]
+        },
+        "overlay_images": []
+      },
+      "screenshots": {
+        "pre_shadows": "benchmarks/render/20260414_001031_suite_r2-async/pre_shadows.png",
+        "post_shadows": "benchmarks/render/20260414_001031_suite_r2-async/post_shadows.png",
+        "full_page": "benchmarks/render/20260414_001031_suite_r2-async/full_page.png"
+      },
+      "ok": true,
+      "strategy": "r2-async",
+      "run_idx": 0,
+      "fatal_error": null
+    },
+    {
+      "label": "r3-preload",
+      "url": "http://localhost:8765/prototype_r3-preload.html",
+      "timestamp": "2026-04-14T04:10:50.422575+00:00",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "timings": {
+        "navigation": {
+          "responseEnd": 6.9000000059604645,
+          "domContentLoaded": 405.20000000298023,
+          "load": 796.2000000029802,
+          "duration": 796.2000000029802
+        }
+      },
+      "lightmap": {
+        "fetchStart": 401.90000000596046,
+        "fetchEnd": 797.2000000029802,
+        "addedAt": 1889.2999999970198,
+        "featureCount": 123105,
+        "status": "done"
+      },
+      "console": [
+        {
+          "type": "warning",
+          "text": "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+          "location": {
+            "url": "",
+            "lineNumber": 14,
+            "columnNumber": 0
+          }
+        }
+      ],
+      "errors": [],
+      "requests_failed": [],
+      "dom_summary": {
+        "canvas_count": 1,
+        "canvas_sizes": [
+          {
+            "w": 1536,
+            "h": 960
+          }
+        ],
+        "leaflet_panes": [
+          "leaflet-pane leaflet-map-pane",
+          "leaflet-pane leaflet-tile-pane",
+          "leaflet-pane leaflet-overlay-pane",
+          "leaflet-pane leaflet-shadow-pane",
+          "leaflet-pane leaflet-marker-pane",
+          "leaflet-pane leaflet-tooltip-pane",
+          "leaflet-pane leaflet-popup-pane",
+          "leaflet-pane leaflet-map-pane",
+          "leaflet-pane leaflet-tile-pane",
+          "leaflet-pane leaflet-overlay-pane",
+          "leaflet-pane leaflet-shadow-pane",
+          "leaflet-pane leaflet-marker-pane",
+          "leaflet-pane leaflet-tooltip-pane",
+          "leaflet-pane leaflet-popup-pane"
+        ],
+        "body_html_len": 93145,
+        "tile_layers": 26,
+        "svg_paths": 6,
+        "overlay_canvas": {
+          "found": 1,
+          "canvases": [
+            {
+              "w": 1536,
+              "h": 960,
+              "sampled": 5760,
+              "nonzero": 2158
+            }
+          ]
+        },
+        "overlay_images": []
+      },
+      "screenshots": {
+        "pre_shadows": "benchmarks/render/20260414_001050_suite_r3-preload/pre_shadows.png",
+        "post_shadows": "benchmarks/render/20260414_001050_suite_r3-preload/post_shadows.png",
+        "full_page": "benchmarks/render/20260414_001050_suite_r3-preload/full_page.png"
+      },
+      "ok": true,
+      "strategy": "r3-preload",
+      "run_idx": 0,
+      "fatal_error": null
+    },
+    {
+      "label": "r4-fade",
+      "url": "http://localhost:8765/prototype_r4-fade.html",
+      "timestamp": "2026-04-14T04:11:10.710489+00:00",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "timings": {
+        "navigation": {
+          "responseEnd": 4.5,
+          "domContentLoaded": 303.90000000596046,
+          "load": 708.7000000029802,
+          "duration": 708.7000000029802
+        }
+      },
+      "lightmap": {
+        "fetchStart": 299.6000000089407,
+        "fetchEnd": 710,
+        "addedAt": 1986.1000000089407,
+        "featureCount": 123105,
+        "status": "done"
+      },
+      "console": [
+        {
+          "type": "warning",
+          "text": "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+          "location": {
+            "url": "",
+            "lineNumber": 14,
+            "columnNumber": 0
+          }
+        }
+      ],
+      "errors": [],
+      "requests_failed": [],
+      "dom_summary": {
+        "canvas_count": 1,
+        "canvas_sizes": [
+          {
+            "w": 1536,
+            "h": 960
+          }
+        ],
+        "leaflet_panes": [
+          "leaflet-pane leaflet-map-pane",
+          "leaflet-pane leaflet-tile-pane",
+          "leaflet-pane leaflet-overlay-pane",
+          "leaflet-pane leaflet-shadow-pane",
+          "leaflet-pane leaflet-marker-pane",
+          "leaflet-pane leaflet-tooltip-pane",
+          "leaflet-pane leaflet-popup-pane",
+          "leaflet-pane leaflet-map-pane",
+          "leaflet-pane leaflet-tile-pane",
+          "leaflet-pane leaflet-overlay-pane",
+          "leaflet-pane leaflet-shadow-pane",
+          "leaflet-pane leaflet-marker-pane",
+          "leaflet-pane leaflet-tooltip-pane",
+          "leaflet-pane leaflet-popup-pane"
+        ],
+        "body_html_len": 93415,
+        "tile_layers": 26,
+        "svg_paths": 6,
+        "overlay_canvas": {
+          "found": 1,
+          "canvases": [
+            {
+              "w": 1536,
+              "h": 960,
+              "sampled": 5760,
+              "nonzero": 2158
+            }
+          ]
+        },
+        "overlay_images": []
+      },
+      "screenshots": {
+        "pre_shadows": "benchmarks/render/20260414_001110_suite_r4-fade/pre_shadows.png",
+        "post_shadows": "benchmarks/render/20260414_001110_suite_r4-fade/post_shadows.png",
+        "full_page": "benchmarks/render/20260414_001110_suite_r4-fade/full_page.png"
+      },
+      "ok": true,
+      "strategy": "r4-fade",
+      "run_idx": 0,
+      "fatal_error": null
+    },
+    {
+      "label": "r5-gzip",
+      "url": "http://localhost:8765/prototype_r5-gzip.html",
+      "timestamp": "2026-04-14T04:11:26.592859+00:00",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "timings": {
+        "navigation": {
+          "responseEnd": 5.0999999940395355,
+          "domContentLoaded": 309.70000000298023,
+          "load": 674,
+          "duration": 674
+        }
+      },
+      "lightmap": {
+        "fetchStart": 304.29999999701977,
+        "fetchEnd": 675.0999999940395,
+        "addedAt": 1799.2000000029802,
+        "featureCount": 123105,
+        "status": "done"
+      },
+      "console": [
+        {
+          "type": "warning",
+          "text": "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+          "location": {
+            "url": "",
+            "lineNumber": 14,
+            "columnNumber": 0
+          }
+        }
+      ],
+      "errors": [],
+      "requests_failed": [],
+      "dom_summary": {
+        "canvas_count": 1,
+        "canvas_sizes": [
+          {
+            "w": 1536,
+            "h": 960
+          }
+        ],
+        "leaflet_panes": [
+          "leaflet-pane leaflet-map-pane",
+          "leaflet-pane leaflet-tile-pane",
+          "leaflet-pane leaflet-overlay-pane",
+          "leaflet-pane leaflet-shadow-pane",
+          "leaflet-pane leaflet-marker-pane",
+          "leaflet-pane leaflet-tooltip-pane",
+          "leaflet-pane leaflet-popup-pane",
+          "leaflet-pane leaflet-map-pane",
+          "leaflet-pane leaflet-tile-pane",
+          "leaflet-pane leaflet-overlay-pane",
+          "leaflet-pane leaflet-shadow-pane",
+          "leaflet-pane leaflet-marker-pane",
+          "leaflet-pane leaflet-tooltip-pane",
+          "leaflet-pane leaflet-popup-pane"
+        ],
+        "body_html_len": 93415,
+        "tile_layers": 26,
+        "svg_paths": 6,
+        "overlay_canvas": {
+          "found": 1,
+          "canvases": [
+            {
+              "w": 1536,
+              "h": 960,
+              "sampled": 5760,
+              "nonzero": 2158
+            }
+          ]
+        },
+        "overlay_images": []
+      },
+      "screenshots": {
+        "pre_shadows": "benchmarks/render/20260414_001126_suite_r5-gzip/pre_shadows.png",
+        "post_shadows": "benchmarks/render/20260414_001126_suite_r5-gzip/post_shadows.png",
+        "full_page": "benchmarks/render/20260414_001126_suite_r5-gzip/full_page.png"
+      },
+      "ok": true,
+      "strategy": "r5-gzip",
+      "run_idx": 0,
+      "fatal_error": null
+    },
+    {
+      "label": "r6-chunked",
+      "url": "http://localhost:8765/prototype_r6-chunked.html",
+      "timestamp": "2026-04-14T04:11:41.794638+00:00",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "timings": {
+        "navigation": {
+          "responseEnd": 4.199999988079071,
+          "domContentLoaded": 300.09999999403954,
+          "load": 785.1999999880791,
+          "duration": 785.1999999880791
+        }
+      },
+      "lightmap": {
+        "fetchStart": 298.3999999910593,
+        "fetchEnd": 603.5,
+        "addedAt": 3506.0999999940395,
+        "featureCount": 123105,
+        "status": "done",
+        "firstChunkAt": 713.3999999910593
+      },
+      "console": [
+        {
+          "type": "warning",
+          "text": "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+          "location": {
+            "url": "",
+            "lineNumber": 14,
+            "columnNumber": 0
+          }
+        }
+      ],
+      "errors": [],
+      "requests_failed": [],
+      "dom_summary": {
+        "canvas_count": 1,
+        "canvas_sizes": [
+          {
+            "w": 1536,
+            "h": 960
+          }
+        ],
+        "leaflet_panes": [
+          "leaflet-pane leaflet-map-pane",
+          "leaflet-pane leaflet-tile-pane",
+          "leaflet-pane leaflet-overlay-pane",
+          "leaflet-pane leaflet-shadow-pane",
+          "leaflet-pane leaflet-marker-pane",
+          "leaflet-pane leaflet-tooltip-pane",
+          "leaflet-pane leaflet-popup-pane",
+          "leaflet-pane leaflet-map-pane",
+          "leaflet-pane leaflet-tile-pane",
+          "leaflet-pane leaflet-overlay-pane",
+          "leaflet-pane leaflet-shadow-pane",
+          "leaflet-pane leaflet-marker-pane",
+          "leaflet-pane leaflet-tooltip-pane",
+          "leaflet-pane leaflet-popup-pane"
+        ],
+        "body_html_len": 94074,
+        "tile_layers": 26,
+        "svg_paths": 6,
+        "overlay_canvas": {
+          "found": 1,
+          "canvases": [
+            {
+              "w": 1536,
+              "h": 960,
+              "sampled": 5760,
+              "nonzero": 2158
+            }
+          ]
+        },
+        "overlay_images": []
+      },
+      "screenshots": {
+        "pre_shadows": "benchmarks/render/20260414_001141_suite_r6-chunked/pre_shadows.png",
+        "post_shadows": "benchmarks/render/20260414_001141_suite_r6-chunked/post_shadows.png",
+        "full_page": "benchmarks/render/20260414_001141_suite_r6-chunked/full_page.png"
+      },
+      "ok": true,
+      "strategy": "r6-chunked",
+      "run_idx": 0,
+      "fatal_error": null
+    },
+    {
+      "label": "r7-canvas-direct",
+      "url": "http://localhost:8765/prototype_r7-canvas-direct.html",
+      "timestamp": "2026-04-14T04:11:59.704036+00:00",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "timings": {
+        "navigation": {
+          "responseEnd": 4.100000008940697,
+          "domContentLoaded": 321.30000001192093,
+          "load": 68377.60000000894,
+          "duration": 68377.60000000894
+        }
+      },
+      "lightmap": {
+        "fetchStart": 318.6000000089407,
+        "fetchEnd": 767.1000000089407,
+        "addedAt": 68313.70000000298,
+        "featureCount": 123105,
+        "status": "done"
+      },
+      "console": [
+        {
+          "type": "warning",
+          "text": "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+          "location": {
+            "url": "",
+            "lineNumber": 14,
+            "columnNumber": 0
+          }
+        }
+      ],
+      "errors": [],
+      "requests_failed": [],
+      "dom_summary": {
+        "canvas_count": 1,
+        "canvas_sizes": [
+          {
+            "w": 1280,
+            "h": 800
+          }
+        ],
+        "leaflet_panes": [
+          "leaflet-pane leaflet-map-pane",
+          "leaflet-pane leaflet-tile-pane",
+          "leaflet-pane leaflet-overlay-pane",
+          "leaflet-pane leaflet-shadow-pane",
+          "leaflet-pane leaflet-marker-pane",
+          "leaflet-pane leaflet-tooltip-pane",
+          "leaflet-pane leaflet-popup-pane",
+          "leaflet-pane leaflet-map-pane",
+          "leaflet-pane leaflet-tile-pane",
+          "leaflet-pane leaflet-overlay-pane",
+          "leaflet-pane leaflet-shadow-pane",
+          "leaflet-pane leaflet-marker-pane",
+          "leaflet-pane leaflet-tooltip-pane",
+          "leaflet-pane leaflet-popup-pane"
+        ],
+        "body_html_len": 96155,
+        "tile_layers": 26,
+        "svg_paths": 6,
+        "overlay_canvas": {
+          "found": 1,
+          "canvases": [
+            {
+              "w": 1280,
+              "h": 800,
+              "sampled": 4000,
+              "nonzero": 1424
+            }
+          ]
+        },
+        "overlay_images": []
+      },
+      "screenshots": {
+        "pre_shadows": "benchmarks/render/20260414_001159_suite_r7-canvas-direct/pre_shadows.png",
+        "post_shadows": "benchmarks/render/20260414_001159_suite_r7-canvas-direct/post_shadows.png",
+        "full_page": "benchmarks/render/20260414_001159_suite_r7-canvas-direct/full_page.png"
+      },
+      "ok": true,
+      "strategy": "r7-canvas-direct",
+      "run_idx": 0,
+      "fatal_error": null
+    },
+    {
+      "label": "r8-png-overlay",
+      "url": "http://localhost:8765/prototype_r8-png-overlay.html",
+      "timestamp": "2026-04-14T04:13:27.347732+00:00",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "timings": {
+        "navigation": {
+          "responseEnd": 3.5,
+          "domContentLoaded": 230.70000000298023,
+          "load": 344.20000000298023,
+          "duration": 344.20000000298023
+        }
+      },
+      "lightmap": {
+        "fetchStart": 343,
+        "fetchEnd": 359.6000000089407,
+        "addedAt": 359.6000000089407,
+        "featureCount": null,
+        "status": "done"
+      },
+      "console": [],
+      "errors": [],
+      "requests_failed": [],
+      "dom_summary": {
+        "canvas_count": 0,
+        "canvas_sizes": [],
+        "leaflet_panes": [
+          "leaflet-pane leaflet-map-pane",
+          "leaflet-pane leaflet-tile-pane",
+          "leaflet-pane leaflet-overlay-pane",
+          "leaflet-pane leaflet-shadow-pane",
+          "leaflet-pane leaflet-marker-pane",
+          "leaflet-pane leaflet-tooltip-pane",
+          "leaflet-pane leaflet-popup-pane",
+          "leaflet-pane leaflet-map-pane",
+          "leaflet-pane leaflet-tile-pane",
+          "leaflet-pane leaflet-overlay-pane",
+          "leaflet-pane leaflet-shadow-pane",
+          "leaflet-pane leaflet-marker-pane",
+          "leaflet-pane leaflet-tooltip-pane",
+          "leaflet-pane leaflet-popup-pane"
+        ],
+        "body_html_len": 92349,
+        "tile_layers": 26,
+        "svg_paths": 6,
+        "overlay_canvas": {
+          "found": 0
+        },
+        "overlay_images": [
+          {
+            "src": "http://localhost:8765/shadows.png",
+            "naturalWidth": 5347,
+            "naturalHeight": 5566,
+            "complete": true
+          }
+        ]
+      },
+      "screenshots": {
+        "pre_shadows": "benchmarks/render/20260414_001327_suite_r8-png-overlay/pre_shadows.png",
+        "post_shadows": "benchmarks/render/20260414_001327_suite_r8-png-overlay/post_shadows.png",
+        "full_page": "benchmarks/render/20260414_001327_suite_r8-png-overlay/full_page.png"
+      },
+      "ok": true,
+      "strategy": "r8-png-overlay",
+      "run_idx": 0,
+      "fatal_error": null
+    }
+  ]
+}

@@ -323,6 +323,84 @@ def compute_shadow_coverage_pil(shadow_polys, resolution_m=10.0, shrink_px=0.7):
     return int((arr > 0).sum()) / total * 100.0
 
 
+def render_shadows_png(shadow_polys, out_path, *, resolution_m=2.0,
+                       shrink_px=0.5, fill="#1f2937", alpha=115):
+    """Server-side rasterize the shadow set into a PNG for L.imageOverlay.
+
+    Used by the r8 render strategy. The image is drawn in RGBA mode so
+    non-shadow pixels are transparent and Leaflet can layer it over the
+    base tiles without a hard background box. A single fill color is
+    used for all shadows (no per-height shading in this path); the
+    per-polygon vector layer is the place to use height-based tinting
+    when it matters, since per-feature styling is the reason to pay the
+    vector rendering cost in the first place.
+
+    resolution_m defaults to 2 m here (not 10 m like the coverage path)
+    because this image is the end-user visual, not a pixel count, so we
+    want it sharp at zoom 15-17. At 10 m grid the stair-stepping is
+    visible on a standard-density display.
+
+    Returns (W, H, bounds_latlng) where bounds_latlng is the
+    [[south, west], [north, east]] pair L.imageOverlay wants.
+    """
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    minx, miny, maxx, maxy = STUDY_AREA.bounds
+    bounds_latlng = [[miny, minx], [maxy, maxx]]
+
+    non_empty = [p for p in (shadow_polys or []) if p is not None and not p.is_empty]
+    if not non_empty:
+        Image.new("RGBA", (4, 4), (0, 0, 0, 0)).save(out_path, "PNG", optimize=True)
+        return 4, 4, bounds_latlng
+
+    width_m = (maxx - minx) * M_PER_DEG_LON
+    height_m = (maxy - miny) * M_PER_DEG_LAT
+    W = max(1, int(round(width_m / resolution_m)))
+    H = max(1, int(round(height_m / resolution_m)))
+
+    dx = W / (maxx - minx)
+    dy = H / (maxy - miny)
+
+    flat = shapely.get_coordinates(non_empty)
+    counts = shapely.get_num_coordinates(non_empty).astype(np.int64)
+    px = (flat[:, 0] - minx) * dx
+    py = (maxy - flat[:, 1]) * dy
+
+    if shrink_px > 0:
+        starts = np.empty_like(counts)
+        starts[0] = 0
+        np.cumsum(counts[:-1], out=starts[1:])
+        sum_x = np.add.reduceat(px, starts)
+        sum_y = np.add.reduceat(py, starts)
+        cx = sum_x / counts
+        cy = sum_y / counts
+        cx_rep = np.repeat(cx, counts)
+        cy_rep = np.repeat(cy, counts)
+        dxv = px - cx_rep
+        dyv = py - cy_rep
+        norms = np.sqrt(dxv * dxv + dyv * dyv)
+        norms = np.where(norms < 1e-12, 1.0, norms)
+        scale = np.maximum(0.0, 1.0 - shrink_px / norms)
+        px = cx_rep + dxv * scale
+        py = cy_rep + dyv * scale
+
+    splits = np.cumsum(counts)[:-1]
+    per_x = np.split(px, splits)
+    per_y = np.split(py, splits)
+
+    hx = fill.lstrip("#")
+    fill_rgba = (int(hx[0:2], 16), int(hx[2:4], 16), int(hx[4:6], 16), alpha)
+
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    for xs, ys in zip(per_x, per_y):
+        draw.polygon(list(zip(xs.tolist(), ys.tolist())), fill=fill_rgba)
+
+    img.save(out_path, "PNG", optimize=True)
+    return W, H, bounds_latlng
+
+
 def compute_shadow_coverage_disjoint(shadow_polys):
     """v7d: use shapely 2.1's disjoint_subset_union_all.
 

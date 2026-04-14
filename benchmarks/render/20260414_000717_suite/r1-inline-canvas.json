@@ -1,0 +1,22 @@
+{
+  "strategy": "r1-inline-canvas",
+  "label": "r1-inline-canvas",
+  "run_idx": 0,
+  "ok": false,
+  "url": "http://localhost:8765/prototype_r1-inline-canvas.html",
+  "lightmap": {},
+  "dom_summary": {},
+  "errors": [
+    "TimeoutError: Page.goto: Timeout 60000ms exceeded.\nCall log:\n  - navigating to \"http://localhost:8765/prototype_r1-inline-canvas.html\", waiting until \"load\"\n"
+  ],
+  "requests_failed": [],
+  "console": [],
+  "screenshots": {},
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "timings": {},
+  "timestamp": "2026-04-14T04:10:09.848606+00:00",
+  "fatal_error": "TimeoutError: Page.goto: Timeout 60000ms exceeded.\nCall log:\n  - navigating to \"http://localhost:8765/prototype_r1-inline-canvas.html\", waiting until \"load\"\n"
+}
