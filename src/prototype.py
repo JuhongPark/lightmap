@@ -443,8 +443,16 @@ RENDER_STRATEGIES = {
         "fade_in": True,
         "gzip_sidecar": False,
     },
+    "r9-png-then-vector": {
+        "label": "r8 PNG preview, then swap in async canvas vector layer",
+        "prefer_canvas": True,
+        "shadow_mode": "png-then-vector",
+        "preload": True,
+        "fade_in": True,
+        "gzip_sidecar": True,
+    },
 }
-DEFAULT_RENDER_STRATEGY = "r4-fade"
+DEFAULT_RENDER_STRATEGY = "r9-png-then-vector"
 
 
 def _create_base_map(tiles="CartoDB positron", *, prefer_canvas=True):
@@ -506,6 +514,8 @@ def _add_shadow_layer(m, shadows, cmap, *, strategy=DEFAULT_RENDER_STRATEGY):
         _add_shadow_layer_inline(m, shadows, cmap)
     elif mode == "png-overlay":
         _add_shadow_layer_png_overlay(m, shadows, cmap, fade_in=cfg["fade_in"])
+    elif mode == "png-then-vector":
+        _add_shadow_layer_png_then_vector(m, shadows, cmap, cfg=cfg)
     else:
         _add_shadow_layer_async(
             m, shadows, cmap,
@@ -515,6 +525,147 @@ def _add_shadow_layer(m, shadows, cmap, *, strategy=DEFAULT_RENDER_STRATEGY):
             chunked_add=cfg.get("chunked_add", False),
             canvas_direct=cfg.get("canvas_direct", False),
         )
+
+
+def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg):
+    """r9: PNG preview overlay first, then async vector layer replaces it.
+
+    Combines r8 (fastest time-to-first-pixel) with r4-fade (interactive
+    vector polygons with per-feature styling). The browser sees the PNG
+    essentially instantly (360 ms), then the bigger GeoJSON sidecar
+    arrives, parses, and the canvas vector layer fades in to replace
+    the PNG preview. __lightmap.addedAt fires when the VECTOR layer is
+    ready, so r9's "total" metric is comparable to r4. We add a new
+    milestone `previewAt` that records when the PNG became visible.
+    """
+    from shapely.geometry import shape as _shape
+
+    # Write both artifacts: PNG preview and vector sidecar (+gz).
+    png_name = "shadows.png"
+    png_path = os.path.join(OUT_DIR, png_name)
+    polys = []
+    for feat in shadows:
+        geom = feat.get("geometry") or {}
+        if geom.get("type") in ("Polygon", "MultiPolygon"):
+            try:
+                polys.append(_shape(geom))
+            except Exception:
+                continue
+    # For r9 we want the PNG to be a lightweight preview that loads
+    # within the first ~100 ms, not the production raster. Drop to a
+    # 20 m grid; file drops from ~1.6 MB to ~60-150 KB while the visual
+    # is still recognizable at zoom 13-14 where the user lands.
+    _W, _H, bounds = render_shadows_png(polys, png_path, resolution_m=20.0)
+    bounds_js = json.dumps(bounds)
+
+    sidecar_name = "shadows.geojson"
+    sidecar_path = os.path.join(OUT_DIR, sidecar_name)
+    with open(sidecar_path, "w") as f:
+        json.dump(
+            {"type": "FeatureCollection", "features": shadows},
+            f,
+            separators=(",", ":"),
+        )
+    if cfg.get("gzip_sidecar"):
+        import gzip as _gzip
+        with open(sidecar_path, "rb") as src, _gzip.open(
+            sidecar_path + ".gz", "wb", 6
+        ) as dst:
+            dst.writelines(src)
+
+    # Preload the PNG preview at high priority so the HTML preload
+    # scanner kicks it off during parse, before even the Leaflet JS
+    # loads. Also preload the vector sidecar at low priority so it
+    # starts after the PNG but still overlaps with Leaflet init.
+    hints = [
+        f'<link rel="preload" href="{png_name}" as="image" '
+        f'fetchpriority="high">',
+    ]
+    if cfg.get("preload"):
+        hints.append(
+            f'<link rel="preload" href="{sidecar_name}" as="fetch" '
+            f'type="application/geo+json" crossorigin="anonymous" '
+            f'fetchpriority="low">'
+        )
+    for h in hints:
+        m.get_root().header.add_child(folium.Element(h))
+
+    stops = _shadow_color_stops_for_js(cmap)
+    stops_js = json.dumps(stops)
+    map_var = m.get_name()
+
+    script = f"""
+<script>
+(function() {{
+  var stops = {stops_js};
+  function colorFor(h) {{
+    for (var i = stops.length - 1; i >= 0; i--) {{
+      if (h >= stops[i][0]) return stops[i][1];
+    }}
+    return stops[0][1];
+  }}
+  function styleFn(feature) {{
+    var h = (feature.properties && feature.properties.height_ft) || 0;
+    var c = colorFor(h);
+    return {{ fillColor: c, color: c, weight: 0.3, fillOpacity: 0.45 }};
+  }}
+  window.__lightmap = {{
+    fetchStart: null,
+    fetchEnd: null,
+    previewAt: null,
+    addedAt: null,
+    featureCount: null,
+    status: 'pending',
+  }};
+  function mark(name) {{ window.__lightmap[name] = performance.now(); }}
+
+  function addPreviewAndVector() {{
+    if (typeof {map_var} === 'undefined') {{
+      setTimeout(addPreviewAndVector, 50);
+      return;
+    }}
+    // Stage 1: PNG preview overlay.
+    var preview = L.imageOverlay('{png_name}', {bounds_js}, {{
+      opacity: 1.0, interactive: false,
+    }});
+    preview.on('load', function() {{ mark('previewAt'); }});
+    preview.addTo({map_var});
+
+    // Stage 2: fetch the vector sidecar in the background. Replaces
+    // the preview as soon as it is drawn.
+    window.__lightmap.status = 'fetching';
+    mark('fetchStart');
+    fetch('{sidecar_name}')
+      .then(function(r) {{ return r.json(); }})
+      .then(function(data) {{
+        mark('fetchEnd');
+        window.__lightmap.featureCount = (data && data.features) ? data.features.length : 0;
+        var layer = L.geoJSON(data, {{ style: styleFn }}).addTo({map_var});
+        var cvs = layer._renderer && layer._renderer._container;
+        if (cvs) {{
+          cvs.style.transition = 'opacity 300ms ease-out';
+          cvs.style.opacity = '0';
+          requestAnimationFrame(function(){{ cvs.style.opacity = '1'; }});
+        }}
+        // Remove the PNG preview on the next frame so the swap is
+        // visually seamless.
+        setTimeout(function() {{
+          {map_var}.removeLayer(preview);
+        }}, 300);
+        window.__lightmap.status = 'done';
+        mark('addedAt');
+      }})
+      .catch(function(err) {{
+        window.__lightmap.status = 'error';
+        window.__lightmap.error = String(err);
+        console.error('failed to load shadows:', err);
+      }});
+  }}
+  addPreviewAndVector();
+}})();
+</script>
+"""
+    m.get_root().html.add_child(folium.Element(script))
 
 
 def _add_shadow_layer_png_overlay(m, shadows, cmap, *, fade_in=False):

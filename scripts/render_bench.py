@@ -74,16 +74,17 @@ def print_suite_summary(results: list[dict]) -> None:
     print("=" * 96)
     hdr = (
         f"  {'strategy':<18s}  {'ok':>3s}  "
-        f"{'fetch':>8s}  {'parse+add':>10s}  {'total':>8s}  "
-        f"{'shadow':>14s}  {'err':>4s}  notes"
+        f"{'fetch':>8s}  {'parse+add':>10s}  {'preview':>8s}  "
+        f"{'total':>8s}  {'shadow':>14s}  {'err':>4s}  notes"
     )
     print(hdr)
-    print("  " + "-" * 96)
+    print("  " + "-" * 106)
     for r in results:
         lm = r.get("lightmap") or {}
         fs = lm.get("fetchStart")
         fe = lm.get("fetchEnd")
         added = lm.get("addedAt")
+        preview_at = lm.get("previewAt")
         fetch_dur = (fe - fs) if (fs is not None and fe is not None) else None
         parse_add = (added - fe) if (fe is not None and added is not None) else None
         total = added
@@ -122,12 +123,14 @@ def print_suite_summary(results: list[dict]) -> None:
             notes = (notes + " " if notes else "") + "TIMEOUT"
         print(
             f"  {r['label']:<18s}  {ok_str:>3s}  "
-            f"{_fmt_ms(fetch_dur)}  {_fmt_ms(parse_add)}  {_fmt_ms(total)}  "
+            f"{_fmt_ms(fetch_dur)}  {_fmt_ms(parse_add)}  "
+            f"{_fmt_ms(preview_at)}  {_fmt_ms(total)}  "
             f"{shadow_visual:>14s}  {err_count:>4d}  {notes}"
         )
     print()
-    print("  total  = addedAt (total ms from navigation start to shadow visible)")
-    print("  shadow = cv <pct%> (canvas nonzero sample) or img <WxH> (PNG overlay)")
+    print("  total   = addedAt (ms to fully interactive vector / final render)")
+    print("  preview = previewAt (ms to first shadow pixels visible, r8/r9)")
+    print("  shadow  = cv <pct%> canvas nonzero or img <WxH> image overlay")
     print()
 
 

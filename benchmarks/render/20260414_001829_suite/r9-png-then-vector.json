@@ -1,0 +1,87 @@
+{
+  "label": "r9-png-then-vector",
+  "url": "http://localhost:8765/prototype_r9-png-then-vector.html",
+  "timestamp": "2026-04-14T04:25:32.226209+00:00",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "timings": {
+    "navigation": {
+      "responseEnd": 4,
+      "domContentLoaded": 349.5,
+      "load": 2262.800000011921,
+      "duration": 2262.800000011921
+    }
+  },
+  "lightmap": {
+    "fetchStart": 346,
+    "fetchEnd": 825.8000000119209,
+    "previewAt": 350,
+    "addedAt": 1941.800000011921,
+    "featureCount": 123105,
+    "status": "done"
+  },
+  "console": [
+    {
+      "type": "warning",
+      "text": "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+      "location": {
+        "url": "",
+        "lineNumber": 14,
+        "columnNumber": 0
+      }
+    }
+  ],
+  "errors": [],
+  "requests_failed": [],
+  "dom_summary": {
+    "canvas_count": 1,
+    "canvas_sizes": [
+      {
+        "w": 1536,
+        "h": 960
+      }
+    ],
+    "leaflet_panes": [
+      "leaflet-pane leaflet-map-pane",
+      "leaflet-pane leaflet-tile-pane",
+      "leaflet-pane leaflet-overlay-pane",
+      "leaflet-pane leaflet-shadow-pane",
+      "leaflet-pane leaflet-marker-pane",
+      "leaflet-pane leaflet-tooltip-pane",
+      "leaflet-pane leaflet-popup-pane",
+      "leaflet-pane leaflet-map-pane",
+      "leaflet-pane leaflet-tile-pane",
+      "leaflet-pane leaflet-overlay-pane",
+      "leaflet-pane leaflet-shadow-pane",
+      "leaflet-pane leaflet-marker-pane",
+      "leaflet-pane leaflet-tooltip-pane",
+      "leaflet-pane leaflet-popup-pane"
+    ],
+    "body_html_len": 93617,
+    "tile_layers": 26,
+    "svg_paths": 6,
+    "overlay_canvas": {
+      "found": 1,
+      "canvases": [
+        {
+          "w": 1536,
+          "h": 960,
+          "sampled": 5760,
+          "nonzero": 2158
+        }
+      ]
+    },
+    "overlay_images": []
+  },
+  "screenshots": {
+    "pre_shadows": "benchmarks/render/20260414_002532_suite_r9-png-then-vector/pre_shadows.png",
+    "post_shadows": "benchmarks/render/20260414_002532_suite_r9-png-then-vector/post_shadows.png",
+    "full_page": "benchmarks/render/20260414_002532_suite_r9-png-then-vector/full_page.png"
+  },
+  "ok": true,
+  "strategy": "r9-png-then-vector",
+  "run_idx": 0,
+  "fatal_error": null
+}
