@@ -359,7 +359,68 @@ def _load_buildings_and_shadows(scale_pct, target_time):
 # Shared layer helpers (eliminate duplication)
 # ---------------------------------------------------------------------------
 
-def _create_base_map(tiles="CartoDB positron"):
+# ---------------------------------------------------------------------------
+# Render strategies
+# ---------------------------------------------------------------------------
+# Each entry here is one version of the browser-side shadow rendering path
+# we have tried. They coexist so the render_bench script can generate every
+# variant, run a headless Chromium load against each, and compare timings.
+# Keys never move or disappear — history is the point.
+
+RENDER_STRATEGIES = {
+    "r0-inline-svg": {
+        "label": "baseline: inline features + SVG renderer",
+        "prefer_canvas": False,
+        "shadow_mode": "inline",      # folium GeoJson with data embedded
+        "preload": False,
+        "fade_in": False,
+        "gzip_sidecar": False,
+    },
+    "r1-inline-canvas": {
+        "label": "inline features + canvas renderer",
+        "prefer_canvas": True,
+        "shadow_mode": "inline",
+        "preload": False,
+        "fade_in": False,
+        "gzip_sidecar": False,
+    },
+    "r2-async": {
+        "label": "async sidecar fetch after load + canvas",
+        "prefer_canvas": True,
+        "shadow_mode": "async",       # fetch on window.load
+        "preload": False,
+        "fade_in": False,
+        "gzip_sidecar": False,
+    },
+    "r3-preload": {
+        "label": "r2 + <link rel=preload> + fetch during HTML parse",
+        "prefer_canvas": True,
+        "shadow_mode": "async-preload",
+        "preload": True,
+        "fade_in": False,
+        "gzip_sidecar": False,
+    },
+    "r4-fade": {
+        "label": "r3 + canvas opacity fade-in transition",
+        "prefer_canvas": True,
+        "shadow_mode": "async-preload",
+        "preload": True,
+        "fade_in": True,
+        "gzip_sidecar": False,
+    },
+    "r5-gzip": {
+        "label": "r4 + gzipped sidecar (requires scripts/serve.py)",
+        "prefer_canvas": True,
+        "shadow_mode": "async-preload",
+        "preload": True,
+        "fade_in": True,
+        "gzip_sidecar": True,
+    },
+}
+DEFAULT_RENDER_STRATEGY = "r4-fade"
+
+
+def _create_base_map(tiles="CartoDB positron", *, prefer_canvas=True):
     # prefer_canvas=True switches Leaflet to Canvas rendering instead of
     # SVG. SVG is fine for hundreds of polygons but chokes on the 123K
     # shadow polygons we render at 100% scale, where every feature becomes
@@ -368,7 +429,7 @@ def _create_base_map(tiles="CartoDB positron"):
     m = folium.Map(
         location=MAP_CENTER, zoom_start=14, tiles=tiles,
         width="100%", height="100%",
-        prefer_canvas=True,
+        prefer_canvas=prefer_canvas,
     )
     m.get_root().html.add_child(folium.Element(
         "<style>html,body{margin:0;padding:0;height:100%;width:100%}</style>"
@@ -403,18 +464,34 @@ def _make_shadow_cmap():
     )
 
 
-def _add_shadow_layer(m, shadows, cmap):
-    # When folium embeds a FeatureCollection inline it writes every feature
-    # into one giant JSON string literal inside the output HTML. At 123K
-    # shadows that line is ~32 MB and browsers hang parsing it. Instead,
-    # for large shadow sets we write the GeoJSON to a sibling file and
-    # inject a tiny Leaflet snippet that fetches it asynchronously after
-    # the base map has rendered. The HTML stays small and the browser can
-    # show tiles immediately.
-    if len(shadows) > 5000:
-        _add_shadow_layer_async(m, shadows, cmap)
-        return
+def _add_shadow_layer(m, shadows, cmap, *, strategy=DEFAULT_RENDER_STRATEGY):
+    """Attach the shadow overlay to the map using the selected strategy.
 
+    See RENDER_STRATEGIES for the catalog of variants and what each flag
+    means. This function only dispatches: each branch below implements
+    one version of the rendering path verbatim, so the benchmark runner
+    can regenerate every variant and diff them.
+    """
+    cfg = RENDER_STRATEGIES.get(strategy) or RENDER_STRATEGIES[DEFAULT_RENDER_STRATEGY]
+
+    if cfg["shadow_mode"] == "inline":
+        _add_shadow_layer_inline(m, shadows, cmap)
+    else:
+        _add_shadow_layer_async(
+            m, shadows, cmap,
+            preload=cfg["preload"],
+            fade_in=cfg["fade_in"],
+            gzip_sidecar=cfg["gzip_sidecar"],
+        )
+
+
+def _add_shadow_layer_inline(m, shadows, cmap):
+    """Baseline: folium embeds every shadow feature inline into the HTML.
+
+    At 123K features this produces a single ~32 MB JS string literal and
+    the browser stalls parsing it. Preserved here as the reference bad
+    case the other strategies are measured against.
+    """
     folium.GeoJson(
         {"type": "FeatureCollection", "features": shadows},
         name="Shadows",
@@ -450,7 +527,8 @@ def _shadow_color_stops_for_js(cmap):
     return stops
 
 
-def _add_shadow_layer_async(m, shadows, cmap):
+def _add_shadow_layer_async(m, shadows, cmap, *, preload=False,
+                             fade_in=False, gzip_sidecar=False):
     """Write shadow FeatureCollection to a side file and fetch it async.
 
     Skips folium's inline-embedding code path entirely. Writes the
@@ -458,6 +536,18 @@ def _add_shadow_layer_async(m, shadows, cmap):
     in raw Leaflet, and relies on `prefer_canvas=True` on the base map so
     the 123K features go to a single <canvas> element instead of the
     DOM.
+
+    Flags let the caller toggle incremental improvements so the render
+    benchmark can measure each in isolation:
+      preload       - inject <link rel=preload> so the browser starts the
+                      shadow fetch during HTML parse instead of after
+                      window.load, overlapping it with base tile loading.
+      fade_in       - animate the canvas opacity from 0 to 1 over 300 ms
+                      so shadows materialize smoothly instead of popping.
+      gzip_sidecar  - also write a .gz version of the sidecar. The page
+                      still references the plain .geojson name; the
+                      gzip-aware server (scripts/serve.py) will serve
+                      the compressed copy with Content-Encoding: gzip.
     """
     sidecar_name = "shadows.geojson"
     sidecar_path = os.path.join(OUT_DIR, sidecar_name)
@@ -468,9 +558,54 @@ def _add_shadow_layer_async(m, shadows, cmap):
             separators=(",", ":"),
         )
 
+    if gzip_sidecar:
+        import gzip as _gzip
+        gz_path = sidecar_path + ".gz"
+        with open(sidecar_path, "rb") as src, _gzip.open(gz_path, "wb", 6) as dst:
+            dst.writelines(src)
+
     stops = _shadow_color_stops_for_js(cmap)
     stops_js = json.dumps(stops)
     map_var = m.get_name()
+
+    if preload:
+        # Put the preload hint in <head> so the HTML preload scanner picks
+        # it up during initial parse, before the main JS runs. The fetch()
+        # call below will reuse the preloaded response from the HTTP cache.
+        preload_hint = (
+            f'<link rel="preload" href="{sidecar_name}" as="fetch" '
+            f'type="application/geo+json" crossorigin="anonymous" '
+            f'fetchpriority="high">'
+        )
+        m.get_root().header.add_child(folium.Element(preload_hint))
+
+    # With preload enabled we kick off the fetch synchronously at script
+    # parse time; the base tiles, leaflet scripts, and our fetch overlap.
+    # Without it we fall back to the old "wait for load event" gate.
+    start_gate_js = (
+        "addShadows();"
+        if preload
+        else (
+            "if (document.readyState === 'complete') { addShadows(); } "
+            "else { window.addEventListener('load', addShadows); }"
+        )
+    )
+
+    # Canvas fade-in uses Leaflet's internal renderer reference to grab
+    # the single <canvas> element backing the shadow layer and animate
+    # its opacity. The reveal feels smooth vs. the default pop-in.
+    fade_in_js = (
+        """
+        var cvs = layer._renderer && layer._renderer._container;
+        if (cvs) {
+          cvs.style.transition = 'opacity 300ms ease-out';
+          cvs.style.opacity = '0';
+          requestAnimationFrame(function(){ cvs.style.opacity = '1'; });
+        }
+        """
+        if fade_in
+        else ""
+    )
 
     script_html = f"""
 <script>
@@ -520,7 +655,7 @@ def _add_shadow_layer_async(m, shadows, cmap):
       .then(function(data) {{
         mark('fetchEnd');
         window.__lightmap.featureCount = (data && data.features) ? data.features.length : 0;
-        L.geoJSON(data, {{ style: styleFn }}).addTo({map_var});
+        var layer = L.geoJSON(data, {{ style: styleFn }}).addTo({map_var});{fade_in_js}
         window.__lightmap.status = 'done';
         mark('addedAt');
       }})
@@ -530,11 +665,7 @@ def _add_shadow_layer_async(m, shadows, cmap):
         console.error('failed to load shadows:', err);
       }});
   }}
-  if (document.readyState === 'complete') {{
-    addShadows();
-  }} else {{
-    window.addEventListener('load', addShadows);
-  }}
+  {start_gate_js}
 }})();
 </script>
 """
@@ -659,20 +790,23 @@ def _add_info_panel(m, lines, theme="light", position="left:60px"):
 # Map builders
 # ---------------------------------------------------------------------------
 
-def build_day_map(target_time, altitude, azimuth, scale_pct):
+def build_day_map(target_time, altitude, azimuth, scale_pct,
+                  render_strategy=DEFAULT_RENDER_STRATEGY):
     building_data, shadows, coverage = _load_buildings_and_shadows(scale_pct, target_time)
     if building_data is None:
         return None
+
+    cfg = RENDER_STRATEGIES.get(render_strategy, RENDER_STRATEGIES[DEFAULT_RENDER_STRATEGY])
 
     # building_count falls back to shadow count when the building layer was
     # dropped for size reasons at 100% scale. Each shadow corresponds to one
     # building anyway.
     building_count = len(building_data["features"]) or len(shadows)
-    m = _create_base_map("CartoDB positron")
+    m = _create_base_map("CartoDB positron", prefer_canvas=cfg["prefer_canvas"])
 
     _add_building_layer(m, building_data)
     cmap = _make_shadow_cmap()
-    _add_shadow_layer(m, shadows, cmap)
+    _add_shadow_layer(m, shadows, cmap, strategy=render_strategy)
     _add_ui_plugins(m, theme="light")
     cmap.add_to(m)
 
@@ -848,9 +982,19 @@ def build_dual_map(target_time, scale_pct):
 # Entry points
 # ---------------------------------------------------------------------------
 
-def build_map(target_time, scale_pct=1, dual=False, time_compare=False):
+def build_map(target_time, scale_pct=1, dual=False, time_compare=False,
+              render_strategy=DEFAULT_RENDER_STRATEGY, out_filename=None):
     os.makedirs(OUT_DIR, exist_ok=True)
-    out_path = os.path.join(OUT_DIR, "prototype.html")
+    # Each strategy writes to its own HTML file so benchmark runs can
+    # generate the full matrix without clobbering each other. The
+    # default (no --render-strategy) still writes prototype.html to
+    # preserve the historical convention.
+    if out_filename is None:
+        if render_strategy == DEFAULT_RENDER_STRATEGY:
+            out_filename = "prototype.html"
+        else:
+            out_filename = f"prototype_{render_strategy}.html"
+    out_path = os.path.join(OUT_DIR, out_filename)
 
     if time_compare:
         m = build_time_map(target_time, scale_pct)
@@ -863,9 +1007,11 @@ def build_map(target_time, scale_pct=1, dual=False, time_compare=False):
         print(f"Time: {target_time.strftime('%Y-%m-%d %H:%M %Z')}")
         print(f"Sun: altitude={altitude:.1f}, azimuth={azimuth:.1f}")
         print(f"Mode: {mode} | Scale: {scale_pct}%")
+        print(f"Render strategy: {render_strategy}")
 
         if is_day:
-            m = build_day_map(target_time, altitude, azimuth, scale_pct)
+            m = build_day_map(target_time, altitude, azimuth, scale_pct,
+                              render_strategy=render_strategy)
         else:
             m = build_night_map(target_time, altitude, azimuth, scale_pct)
 
@@ -902,6 +1048,17 @@ def main():
         "--time-compare", action="store_true",
         help="Shadow animation across 6 time steps (7 AM - 5 PM)",
     )
+    parser.add_argument(
+        "--render-strategy", default=DEFAULT_RENDER_STRATEGY,
+        choices=list(RENDER_STRATEGIES.keys()),
+        help="Browser-side rendering strategy. See RENDER_STRATEGIES. "
+             f"Default: {DEFAULT_RENDER_STRATEGY}.",
+    )
+    parser.add_argument(
+        "--out", default=None,
+        help="Output filename under docs/. Defaults to prototype.html for "
+             "the default strategy and prototype_<key>.html otherwise.",
+    )
     args = parser.parse_args()
 
     if args.night:
@@ -911,7 +1068,9 @@ def main():
         target_time = target_time.replace(tzinfo=BOSTON_TZ)
 
     build_map(target_time, args.scale, dual=args.dual,
-              time_compare=args.time_compare)
+              time_compare=args.time_compare,
+              render_strategy=args.render_strategy,
+              out_filename=args.out)
 
 
 if __name__ == "__main__":
