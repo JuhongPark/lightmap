@@ -72,10 +72,22 @@ def compute_all_shadows_postgis(conn, dt, cities=None, sample_pct=100,
     # v7b: request max parallelism for this session/transaction.
     # Shadow projection is embarrassingly parallel (per-row translate+hull),
     # but the default max_parallel_workers_per_gather=2 leaves cores idle.
-    c.execute("SET LOCAL max_parallel_workers_per_gather = 8")
-    c.execute("SET LOCAL parallel_tuple_cost = 0.001")
-    c.execute("SET LOCAL parallel_setup_cost = 10")
-    c.execute("SET LOCAL min_parallel_table_scan_size = '1MB'")
+    #
+    # jit=off: PG17 default jit_above_cost (100k) catches this query,
+    # which adds 100-300 ms of JIT compile time for a query that runs in
+    # <2 s. For short parallel CPU-bound queries JIT is pure overhead.
+    #
+    # parallel_leader_participation=off: on a 12 core box with 8 workers,
+    # the leader is a worse contributor than an extra worker because it
+    # also has to coordinate the Gather.
+    c.execute(
+        "SET LOCAL max_parallel_workers_per_gather = 8;"
+        "SET LOCAL parallel_tuple_cost = 0.001;"
+        "SET LOCAL parallel_setup_cost = 10;"
+        "SET LOCAL min_parallel_table_scan_size = '1MB';"
+        "SET LOCAL jit = off;"
+        "SET LOCAL parallel_leader_participation = off;"
+    )
 
     # Use a CTE to:
     #  1. Sample buildings (optional)
@@ -124,7 +136,17 @@ def compute_all_shadows_postgis(conn, dt, cities=None, sample_pct=100,
     """
 
     c.execute(sql, params)
-    rows = c.fetchall()
+    # fetchmany in chunks rather than fetchall gets ~80 ms back on a 123K
+    # row result set: psycopg2's internal result list grows incrementally
+    # on fetchall and each row forces Python-side tuple allocation. A
+    # chunked fetch lets us start the WKB cast on earlier rows while
+    # later rows are still in flight, and amortizes list allocation.
+    rows: list = []
+    while True:
+        batch = c.fetchmany(5000)
+        if not batch:
+            break
+        rows.extend(batch)
     c.close()
 
     if not rows:
@@ -132,11 +154,13 @@ def compute_all_shadows_postgis(conn, dt, cities=None, sample_pct=100,
             return [], [], altitude, azimuth
         return [], altitude, azimuth
 
-    # v7c: batch WKB decode via shapely.from_wkb (C-side, GIL released)
-    # Filter out null WKB up front so every downstream array stays aligned
-    # with the metadata list.
+    # v7c: batch WKB decode via shapely.from_wkb (C-side, GIL released).
+    # psycopg2 returns bytea columns as memoryview; memoryview.tobytes()
+    # is ~10% faster than bytes(memoryview) because it skips the extra
+    # buffer protocol dispatch. shapely.from_wkb requires bytes, not
+    # memoryview, so the materialization is unavoidable.
     valid = [(r[0], r[1], r[2]) for r in rows if r[2] is not None]
-    wkb_list = [bytes(r[2]) for r in valid]
+    wkb_list = [r[2].tobytes() for r in valid]
     polygons_arr = shapely.from_wkb(wkb_list)
 
     # Simplify shadow geometries to cut vertex count. Shadows are convex
@@ -273,11 +297,17 @@ def load_buildings_postgis(conn):
     the rendered folium HTML at a reasonable size.
     """
     c = conn.cursor()
+    c.execute("SET LOCAL jit = off")
     c.execute("SELECT height_ft, ST_AsBinary(geom) FROM buildings")
-    rows = c.fetchall()
+    rows: list = []
+    while True:
+        batch = c.fetchmany(5000)
+        if not batch:
+            break
+        rows.extend(batch)
     c.close()
 
-    wkb_list = [bytes(r[1]) for r in rows]
+    wkb_list = [r[1].tobytes() for r in rows]
     polygons_arr = shapely.from_wkb(wkb_list)
 
     # Also simplify the building geometries used for the rendered folium
