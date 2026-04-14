@@ -137,25 +137,28 @@ def compute_all_shadows_postgis(conn, dt, cities=None, sample_pct=100,
     # Simplify shadow geometries to cut vertex count. Shadows are convex
     # hulls of building + translated building, and that hull can carry
     # 10-20+ vertices on complex buildings. Simplifying at 5e-5 deg (~5.5m)
-    # cuts the per-polygon work downstream (coverage stages + HTML size)
-    # by more than the 0.3-0.5s the simplify itself costs.
-    simplified_arr = shapely.simplify(polygons_arr, 5e-5, preserve_topology=True)
-
-    # Drop rows whose simplified result collapsed to empty. Everything below
-    # keeps parallel alignment between the metadata arrays and the numpy
-    # coordinate array.
+    # cuts the per-polygon work downstream (coverage stages + HTML size).
+    # preserve_topology=False roughly halves the simplify cost and is safe
+    # here because the input is a convex hull (no interior topology to
+    # preserve). A handful of very small shadows collapse to empty under
+    # this mode, so for those we fall back to the raw hull rather than
+    # dropping the row and losing the visual from the rendered map.
+    simplified_arr = shapely.simplify(
+        polygons_arr, 5e-5, preserve_topology=False
+    )
     empty_mask = shapely.is_empty(simplified_arr)
-    keep = ~empty_mask
-    simplified_arr = simplified_arr[keep]
-    valid_kept = [(m[0], m[1]) for m, k in zip(valid, keep) if k]
+    display_arr = np.where(empty_mask, polygons_arr, simplified_arr)
+
+    # valid_kept stays aligned 1:1 with display_arr; no rows dropped.
+    valid_kept = [(m[0], m[1]) for m in valid]
 
     # Batch coord extraction: one C call into GEOS produces a flat (N, 2)
     # ndarray of every vertex across every polygon, and a parallel int
     # array of per-polygon vertex counts lets us slice it without a Python
     # loop over vertices.
-    flat_coords = shapely.get_coordinates(simplified_arr)
+    flat_coords = shapely.get_coordinates(display_arr)
     np.round(flat_coords, 6, out=flat_coords)
-    vertex_counts = shapely.get_num_coordinates(simplified_arr)
+    vertex_counts = shapely.get_num_coordinates(display_arr)
     split_points = np.cumsum(vertex_counts)[:-1]
     per_poly_coords = np.split(flat_coords, split_points)
 
