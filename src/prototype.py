@@ -489,17 +489,44 @@ def _add_shadow_layer_async(m, shadows, cmap):
       fillColor: c, color: c, weight: 0.3, fillOpacity: 0.45
     }};
   }}
+  // Expose render milestones for headless verification. A separate test
+  // harness can poll these flags or wait on the custom events emitted
+  // below to build a timing profile without guessing.
+  window.__lightmap = {{
+    fetchStart: null,
+    fetchEnd: null,
+    addedAt: null,
+    featureCount: null,
+    status: 'pending',
+  }};
+  function mark(name) {{
+    var t = performance.now();
+    window.__lightmap[name] = t;
+    try {{
+      window.dispatchEvent(new CustomEvent('lightmap:' + name, {{
+        detail: {{ t: t, status: window.__lightmap.status }}
+      }}));
+    }} catch (e) {{ /* older browsers, no CustomEvent ctor */ }}
+  }}
   function addShadows() {{
     if (typeof {map_var} === 'undefined') {{
       setTimeout(addShadows, 50);
       return;
     }}
+    window.__lightmap.status = 'fetching';
+    mark('fetchStart');
     fetch('{sidecar_name}')
       .then(function(r) {{ return r.json(); }})
       .then(function(data) {{
+        mark('fetchEnd');
+        window.__lightmap.featureCount = (data && data.features) ? data.features.length : 0;
         L.geoJSON(data, {{ style: styleFn }}).addTo({map_var});
+        window.__lightmap.status = 'done';
+        mark('addedAt');
       }})
       .catch(function(err) {{
+        window.__lightmap.status = 'error';
+        window.__lightmap.error = String(err);
         console.error('failed to load shadows:', err);
       }});
   }}
