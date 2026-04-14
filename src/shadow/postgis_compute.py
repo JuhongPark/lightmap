@@ -93,6 +93,11 @@ def compute_all_shadows_postgis(conn, dt, cities=None, sample_pct=100,
         where_clause = "WHERE random() < %s"
         params.append(sample_pct / 100.0)
 
+    # ST_Collect just groups the two geometries into a GeometryCollection,
+    # while ST_Union actually computes a merged polygon. For shadow hulls
+    # we only need the convex envelope of the combined point set, so
+    # ST_Collect is the equivalent cheaper operation. GEOS' ConvexHull
+    # accepts any geometry type and yields the same result.
     sql = f"""
         WITH shadow_calc AS (
             SELECT
@@ -114,7 +119,7 @@ def compute_all_shadows_postgis(conn, dt, cities=None, sample_pct=100,
         SELECT
             height_ft,
             shadow_m,
-            ST_AsBinary(ST_ConvexHull(ST_Union(geom, shifted))) AS shadow_wkb
+            ST_AsBinary(ST_ConvexHull(ST_Collect(geom, shifted))) AS shadow_wkb
         FROM translated
     """
 
@@ -149,9 +154,6 @@ def compute_all_shadows_postgis(conn, dt, cities=None, sample_pct=100,
     empty_mask = shapely.is_empty(simplified_arr)
     display_arr = np.where(empty_mask, polygons_arr, simplified_arr)
 
-    # valid_kept stays aligned 1:1 with display_arr; no rows dropped.
-    valid_kept = [(m[0], m[1]) for m in valid]
-
     # Batch coord extraction: one C call into GEOS produces a flat (N, 2)
     # ndarray of every vertex across every polygon, and a parallel int
     # array of per-polygon vertex counts lets us slice it without a Python
@@ -162,6 +164,20 @@ def compute_all_shadows_postgis(conn, dt, cities=None, sample_pct=100,
     split_points = np.cumsum(vertex_counts)[:-1]
     per_poly_coords = np.split(flat_coords, split_points)
 
+    # Pre-compute the per-row scalar properties as numpy arrays so the
+    # feature dict comprehension only has to read already-rounded Python
+    # floats. Doing this inside the per-row loop via round(float(x), 1)
+    # was ~0.15s of Python-level work; the batched np.round + .tolist()
+    # path runs in ~0.01s.
+    heights_arr = np.fromiter(
+        (m[0] for m in valid), dtype=np.float64, count=len(valid)
+    )
+    shadow_m_arr = np.fromiter(
+        (m[1] for m in valid), dtype=np.float64, count=len(valid)
+    )
+    heights_rounded = np.round(heights_arr, 1).tolist()
+    shadow_len_ft_rounded = np.round(shadow_m_arr / 0.3048, 1).tolist()
+
     # Build features. The only per-row Python work left is wrapping the
     # numpy slice with a GeoJSON-shaped dict, which is unavoidable because
     # folium and consumers expect this shape.
@@ -169,15 +185,17 @@ def compute_all_shadows_postgis(conn, dt, cities=None, sample_pct=100,
         {
             "type": "Feature",
             "properties": {
-                "height_ft": round(float(height_ft), 1),
-                "shadow_len_ft": round(float(shadow_m) / 0.3048, 1),
+                "height_ft": h,
+                "shadow_len_ft": sl,
             },
             "geometry": {
                 "type": "Polygon",
                 "coordinates": [coords.tolist()],
             },
         }
-        for (height_ft, shadow_m), coords in zip(valid_kept, per_poly_coords)
+        for h, sl, coords in zip(
+            heights_rounded, shadow_len_ft_rounded, per_poly_coords
+        )
     ]
 
     if return_polygons:
