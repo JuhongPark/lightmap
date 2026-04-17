@@ -1,0 +1,22 @@
+{
+  "strategy": "r0-inline-svg",
+  "label": "r0-inline-svg",
+  "run_idx": 0,
+  "ok": false,
+  "url": "http://localhost:8765/prototype_r0-inline-svg.html",
+  "lightmap": {},
+  "dom_summary": {},
+  "errors": [
+    "TimeoutError: Page.goto: Timeout 60000ms exceeded.\nCall log:\n  - navigating to \"http://localhost:8765/prototype_r0-inline-svg.html\", waiting until \"load\"\n"
+  ],
+  "requests_failed": [],
+  "console": [],
+  "screenshots": {},
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "timings": {},
+  "timestamp": "2026-04-17T19:19:17.139672+00:00",
+  "fatal_error": "TimeoutError: Page.goto: Timeout 60000ms exceeded.\nCall log:\n  - navigating to \"http://localhost:8765/prototype_r0-inline-svg.html\", waiting until \"load\"\n"
+}

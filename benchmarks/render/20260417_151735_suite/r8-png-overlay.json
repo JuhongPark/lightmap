@@ -1,0 +1,76 @@
+{
+  "label": "r8-png-overlay",
+  "url": "http://localhost:8765/prototype_r8-png-overlay.html",
+  "timestamp": "2026-04-17T19:29:46.955317+00:00",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "timings": {
+    "navigation": {
+      "responseEnd": 4.899999991059303,
+      "domContentLoaded": 220,
+      "load": 311,
+      "duration": 311
+    },
+    "paint": {
+      "fcp": 232,
+      "lcp": 656,
+      "lcp_element": "IMG",
+      "lcp_size": 978400
+    }
+  },
+  "lightmap": {
+    "fetchStart": 310.5,
+    "fetchEnd": 328.8999999910593,
+    "addedAt": 329.09999999403954,
+    "featureCount": null,
+    "status": "done"
+  },
+  "console": [],
+  "errors": [],
+  "requests_failed": [],
+  "dom_summary": {
+    "canvas_count": 0,
+    "canvas_sizes": [],
+    "leaflet_panes": [
+      "leaflet-pane leaflet-map-pane",
+      "leaflet-pane leaflet-tile-pane",
+      "leaflet-pane leaflet-overlay-pane",
+      "leaflet-pane leaflet-shadow-pane",
+      "leaflet-pane leaflet-marker-pane",
+      "leaflet-pane leaflet-tooltip-pane",
+      "leaflet-pane leaflet-popup-pane",
+      "leaflet-pane leaflet-map-pane",
+      "leaflet-pane leaflet-tile-pane",
+      "leaflet-pane leaflet-overlay-pane",
+      "leaflet-pane leaflet-shadow-pane",
+      "leaflet-pane leaflet-marker-pane",
+      "leaflet-pane leaflet-tooltip-pane",
+      "leaflet-pane leaflet-popup-pane"
+    ],
+    "body_html_len": 92349,
+    "tile_layers": 26,
+    "svg_paths": 6,
+    "overlay_canvas": {
+      "found": 0
+    },
+    "overlay_images": [
+      {
+        "src": "http://localhost:8765/shadows.png",
+        "naturalWidth": 5347,
+        "naturalHeight": 5566,
+        "complete": true
+      }
+    ]
+  },
+  "screenshots": {
+    "pre_shadows": "benchmarks/render/20260417_152946_suite_r8-png-overlay/pre_shadows.png",
+    "post_shadows": "benchmarks/render/20260417_152946_suite_r8-png-overlay/post_shadows.png",
+    "full_page": "benchmarks/render/20260417_152946_suite_r8-png-overlay/full_page.png"
+  },
+  "ok": true,
+  "strategy": "r8-png-overlay",
+  "run_idx": 1,
+  "fatal_error": null
+}
