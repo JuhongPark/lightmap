@@ -93,6 +93,13 @@ def run(url: str, label: str, viewport_w: int, viewport_h: int,
         # Install PerformanceObserver before any page script runs so FCP
         # and LCP entries are not missed (buffered:true also catches
         # entries that fired before the observer was registered).
+        #
+        # For LCP we capture more than tagName — at 123K shadows, the
+        # raw "tag=IMG" doesn't distinguish between a shadow preview
+        # PNG (what we want to measure) and a CARTO basemap tile
+        # (often the LCP for vector-only strategies). `lcp_kind` is
+        # derived from className: "shadows" if the leaflet image layer
+        # loaded shadows.png, "tile" if a basemap tile, else "other".
         context.add_init_script("""
             (() => {
               window.__lightmap_perf = {
@@ -100,14 +107,36 @@ def run(url: str, label: str, viewport_w: int, viewport_h: int,
                 lcp: null,
                 lcp_element: null,
                 lcp_size: null,
+                lcp_src: null,
+                lcp_class: null,
+                lcp_kind: null,
               };
+              function classify(el, src) {
+                if (!el) return null;
+                var cn = el.className || '';
+                if (typeof cn !== 'string') cn = cn.baseVal || '';
+                if (cn.indexOf('leaflet-image-layer') >= 0) {
+                  return (src || '').indexOf('shadows') >= 0
+                    ? 'shadows' : 'image-layer';
+                }
+                if (cn.indexOf('leaflet-tile') >= 0) return 'tile';
+                if (cn.indexOf('leaflet-overlay-pane') >= 0) return 'overlay';
+                return 'other';
+              }
               try {
                 new PerformanceObserver((list) => {
                   for (const e of list.getEntries()) {
+                    var el = e.element;
+                    var src = (el && (el.currentSrc || el.src)) || null;
                     window.__lightmap_perf.lcp = e.startTime;
                     window.__lightmap_perf.lcp_size = e.size;
-                    window.__lightmap_perf.lcp_element =
-                      e.element && e.element.tagName;
+                    window.__lightmap_perf.lcp_element = el && el.tagName;
+                    window.__lightmap_perf.lcp_src = src;
+                    window.__lightmap_perf.lcp_class = el && (
+                      typeof el.className === 'string'
+                        ? el.className : (el.className && el.className.baseVal)
+                    );
+                    window.__lightmap_perf.lcp_kind = classify(el, src);
                   }
                 }).observe({type: 'largest-contentful-paint', buffered: true});
               } catch (e) {}
@@ -336,7 +365,10 @@ def print_summary(r: RenderResult) -> None:
     if fcp is not None:
         print(f"  FCP:                {fcp:.0f} ms")
     if lcp is not None:
-        print(f"  LCP:                {lcp:.0f} ms (element={lcp_el})")
+        kind = paint.get("lcp_kind") or "?"
+        src = (paint.get("lcp_src") or "").split("/")[-1] or "-"
+        print(f"  LCP:                {lcp:.0f} ms "
+              f"(kind={kind}, tag={lcp_el}, src={src})")
     if lm:
         fs = lm.get("fetchStart")
         fe = lm.get("fetchEnd")

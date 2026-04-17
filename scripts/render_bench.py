@@ -102,10 +102,11 @@ def print_suite_summary(results: list[dict]) -> None:
         f"  {'strategy':<18s}  {'ok':>3s}  "
         f"{'fetch':>8s}  {'parse+add':>10s}  {'preview':>8s}  "
         f"{'total':>8s}  {'vs exp':>8s}  {'FCP':>6s}  {'LCP':>6s}  "
+        f"{'LCPkind':>8s}  "
         f"{'shadow':>14s}  {'err':>4s}  notes"
     )
     print(hdr)
-    print("  " + "-" * 130)
+    print("  " + "-" * 140)
     for r in results:
         lm = r.get("lightmap") or {}
         fs = lm.get("fetchStart")
@@ -118,6 +119,7 @@ def print_suite_summary(results: list[dict]) -> None:
         paint = (r.get("timings") or {}).get("paint") or {}
         fcp = paint.get("fcp")
         lcp = paint.get("lcp")
+        lcp_kind = (paint.get("lcp_kind") or "-")[:8]
 
         # Visual sanity: either we have a non-empty canvas overlay or
         # a loaded image overlay. Canvas strategies fill nz_pct; image
@@ -170,6 +172,7 @@ def print_suite_summary(results: list[dict]) -> None:
             f"{_fmt_ms(preview_at)}  {_fmt_ms(total)}  "
             f"{regr_cell:>8s}  "
             f"{_fmt_ms_short(fcp)}  {_fmt_ms_short(lcp)}  "
+            f"{lcp_kind:>8s}  "
             f"{shadow_visual:>14s}  {err_count:>4d}  {notes}"
         )
     print()
@@ -178,6 +181,10 @@ def print_suite_summary(results: list[dict]) -> None:
     print("  vs exp  = total vs expected_total_ms in RENDER_STRATEGIES.")
     print("            ok = within +50%/-30%, REGR/FAST = outside, no-bud = None.")
     print("  FCP/LCP = browser PerformanceObserver values at end of run.")
+    print("  LCPkind = classification of the LCP element:")
+    print("            shadows  = PNG shadow preview (r8/r9 design target)")
+    print("            tile     = CARTO basemap tile (most vector strategies)")
+    print("            other    = fallback, inspect lcp_src/class for detail")
     print("  shadow  = cv <pct%> canvas nonzero or img <WxH> image overlay")
     print()
 
