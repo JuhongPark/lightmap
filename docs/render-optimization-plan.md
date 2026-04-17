@@ -82,10 +82,22 @@ captures browser standard paint metrics:
 | FCP | First Contentful Paint. First time any non-white pixel is drawn. |
 | LCP | Largest Contentful Paint. The biggest visible element at the end of the run, with its tag name. |
 
-LCP's `element` field is a useful signal: for r9 it consistently
-reports `IMG`, confirming the browser identifies the PNG preview as the
-largest-contentful paint — exactly the hypothesis r9 was designed
-around.
+LCP's element field is a useful signal. We classify it into a `kind`
+so the bench table is not ambiguous:
+
+- `kind=shadows` — the LCP element is our `shadows.png` preview
+  (the r8/r9 design target).
+- `kind=tile` — the LCP element is a CARTO basemap tile. This is what
+  the browser picks for vector-only strategies (r2–r6) when no image
+  overlay ever appears — the LCP number then reflects basemap paint
+  time, not shadow paint time.
+- `kind=other` — fallback, inspect `lcp_src` / `lcp_class` for
+  detail.
+
+For r9 the kind is consistently `shadows`, confirming the browser
+measures the PNG preview as the largest-contentful paint — exactly
+the hypothesis r9 was designed around. For r2–r6 the kind is `tile`,
+so the LCP number is not directly comparable to r9's.
 
 ### How to run
 
@@ -135,13 +147,14 @@ file's. Otherwise the fresh plain file wins. Run with the updated
 
 ## Results per version
 
-Numbers below come from two best-of-3 suites:
+Numbers below come from best-of-3 suite `20260417_183337_suite`, taken
+after two infrastructure fixes were in place:
 
-- `20260417_151735_suite` — r5 through r9 (server's gzip behavior was
-  correct for these because each of these strategies rewrites both
-  `shadows.geojson` and `shadows.geojson.gz` on regen).
-- `20260417_154327_suite` — r2, r3, r4 re-measured after the stale
-  `.gz` fix in `scripts/serve.py` landed.
+- `scripts/serve.py` now refuses to serve a `.gz` sidecar whose mtime
+  is older than the plain file (fixes a run where r2/r3/r4 saw a
+  scale=1 sidecar from a prior test).
+- `render_verify.py` now classifies the LCP element into
+  `shadows` / `tile` / `other` instead of only reporting `tag=IMG`.
 
 r0 and r1 time out in every run as expected. All measurements at
 scale=100 on WSL2 with light background load.
@@ -183,14 +196,16 @@ whitespace) and fetch it after `window.load`.
 
 | Metric | Value |
 |---|---|
-| total (addedAt) | 1701 ms |
-| fetch duration | 326 ms |
-| parse + add | 1025 ms |
-| LCP | 304 ms (element `IMG`) |
+| total (addedAt) | 2316 ms |
+| fetch duration | 266 ms |
+| parse + add | 911 ms |
+| LCP | 664 ms (kind `tile` — a CARTO basemap tile, not the shadow) |
 
 The browser parses the (now small) HTML instantly and the sidecar
 loads in parallel with Leaflet's base tiles. This is the version that
-makes the app usable at 100 % scale.
+makes the app usable at 100 % scale. LCP kind `tile` means the browser
+measured a map tile paint, not the shadow layer — the `addedAt`
+number is the right one to compare to r9.
 
 ### r3-preload
 
@@ -201,13 +216,12 @@ reuses the preloaded response from the HTTP cache.
 
 | Metric | Value | Δ vs r2 |
 |---|---|---|
-| total (addedAt) | 1354 ms | −347 ms (−20 %) |
-| fetch duration | 263 ms | −63 ms |
+| total (addedAt) | 1349 ms | **−967 ms (−42 %)** |
+| fetch duration | 210 ms | −56 ms |
 
 Preload overlaps the fetch with Leaflet initialization and base tile
-loading. The gain is modest when network and parse are already fast;
-on a heavier load (the original `20260414_001829_suite` measured this
-transition at −1700 ms) the overlap is much more decisive.
+loading, cutting wall time by almost half. LCP kind is again `tile`,
+still not a direct shadow-paint signal.
 
 ### r4-fade
 
@@ -216,7 +230,7 @@ not a speed improvement.
 
 | Metric | Value | Δ vs r3 |
 |---|---|---|
-| total (addedAt) | 1358 ms | +4 ms (tied) |
+| total (addedAt) | 1330 ms | −19 ms (noise) |
 
 r4's user-facing gain is subjective: shadows don't pop onto the map,
 they fade in. Same wall time, better perceived quality.
@@ -230,15 +244,14 @@ r4 + also write `shadows.geojson.gz` sidecar. The gzip-aware server
 
 | Metric | Value | Δ vs r4 |
 |---|---|---|
-| total (addedAt) | 1329 ms | −29 ms (≈tied) |
-| fetch duration | 267 ms | −3 ms |
+| total (addedAt) | 1386 ms | +56 ms (noise) |
+| fetch duration | 209 ms | −1 ms |
 | sidecar on wire | 3.9 MB | down from 28 MB (~7× smaller) |
 
-On a LAN the localhost network is so fast that the 7× size reduction
-barely registers. The older `20260414_001829_suite` (more contended
-disk and CPU) measured r5 −652 ms faster than r4 — that is the gain
-users on a real internet connection will see. Both numbers are
-reported so the effect of system load is visible.
+On localhost the 7× size reduction barely registers — the network
+was never the bottleneck. On a real internet connection the gain
+will be substantially larger (historically measured at −652 ms on a
+more contended setup).
 
 ### r6-chunked
 
@@ -249,7 +262,7 @@ even if total time was the same.
 
 | Metric | Value | Δ vs r5 |
 |---|---|---|
-| total (addedAt) | 2568 ms | **+1239 ms (+93 %)** |
+| total (addedAt) | 2475 ms | **+1089 ms (+79 %)** |
 
 r6 is nearly 2× **slower** than r5. Leaflet's `addData()` rebuilds
 internal spatial indexes on every call, so 30 calls of 4 K features
@@ -278,6 +291,9 @@ r7 is preserved as a committed cautionary baseline. The lesson: a
 naive "let me just draw canvas directly" intuition is wrong when the
 library is already doing non-trivial work you have to replicate.
 
+r7 was skipped in the latest suite to keep total bench time
+manageable. Number is from `20260417_151735_suite`.
+
 ### r8-png-overlay
 
 Rasterize shadows to a PNG at build time (Pillow + rasterio geometry
@@ -285,15 +301,24 @@ trick), ship as a single `<img>` via `L.imageOverlay`.
 
 | Metric | Value | Δ vs r5 |
 |---|---|---|
-| total (addedAt) | 329 ms | **−1000 ms (−75 %)** |
-| fetch duration | 18 ms | — |
-| image size | 5347 × 5566 px |
+| total (addedAt) | 1268 ms | −118 ms |
+| fetch duration | 20 ms | |
+| LCP | 1524 ms (kind `shadows` — the PNG itself) |
+| image size | 5347 × 5566 px at 2 m resolution |
 
-Blows past r5 by an order of magnitude on first-pixel time. But there
-is a significant tradeoff: the overlay is a static image. No
+r8's absolute `addedAt` is **noisy** across runs: 329 ms in
+`20260417_151735_suite` vs 1268 ms here. The reason is that r8 waits
+for `window.load` before attaching the overlay, so its total time
+includes every network resource the browser chose to fetch first
+(base map tiles, icons, fonts from CARTO). When that contention is
+low, r8 lands in ~300 ms; under noise it spills to 1 s+. The moment
+the image is drawn is what matters for perceived performance, which
+is why r9 inherits r8's PNG preload trick but does not gate the
+display on `window.load`.
+
+The tradeoff with r8 remains: the overlay is a static image. No
 per-feature styling, no tooltips, no click targets. Beautiful for
-screenshots and for users who will not interact with shadows, but not
-a complete interactive solution.
+screenshots; not a complete interactive solution.
 
 ### r9-png-then-vector (current default)
 
@@ -303,10 +328,10 @@ still fetching and parsing.
 
 | Metric | Value |
 |---|---|
-| previewAt | 198 ms |
-| total (addedAt) | 1245 ms |
-| LCP | 240 ms (element `IMG`) |
-| FCP | 220 ms |
+| previewAt | 376 ms |
+| total (addedAt) | 1317 ms |
+| LCP | 612 ms (kind `shadows` — the PNG preview itself) |
+| FCP | 392 ms |
 
 Flow:
 
@@ -323,50 +348,55 @@ The LCP element of `IMG` is a strong signal that the browser itself
 measures the PNG preview as the biggest visible element at the decision
 point, confirming the design intent.
 
-**Caveat**: r5-gzip's total (1329 ms) is currently comparable to r9's
-total (1245 ms), and in some older runs r5 even beat r9 on the
-`addedAt` metric. r9 is the default because `previewAt` (~200 ms)
-dominates user-perceived performance, not `addedAt`. If you change the
-default back to r5, users will stare at an empty map for a full second
-while the sidecar parses — the bench `total` number hides this. LCP
-element = `IMG` in r9 confirms the PNG preview is what the browser
-measures as the largest visible element at the measurement point,
-which aligns directly with what a user sees.
+**Caveat**: r5-gzip's total (1386 ms) is comparable to r9's
+total (1317 ms), and the LCP number for r5 (1544 ms, kind `tile`)
+is higher than r9's LCP (612 ms, kind `shadows`). r9 is the default
+because `previewAt` (376 ms) dominates user-perceived performance,
+not `addedAt`. If you change the default back to r5, users will
+stare at an empty map for a full second while the sidecar parses —
+the bench `total` number hides this. The `kind=shadows` on r9's LCP
+confirms the browser measures the PNG preview as the largest visible
+element at the measurement point, which aligns directly with what a
+user sees.
 
 ## Final Comparison
 
-Best-of-3 numbers at scale=100. r2/r3/r4 from suite
-`20260417_154327_suite` (measured after the stale-.gz fix); r5 through
-r9 from suite `20260417_151735_suite`. See the per-version section
-above for older numbers from a more contended host, which are also
-informative about how much of each gain depends on system load.
+Best-of-3 numbers at scale=100 from `20260417_183337_suite`. r7 is
+from `20260417_151735_suite` (skipped in the latest run due to its
+~1 min per-run cost).
 
-| Version | total (ms) | preview (ms) | FCP | LCP | notes |
-|---------|------------|--------------|-----|-----|-------|
-| r0-inline-svg | TIMEOUT | — | — | — | 32 MB JS literal, 123 K SVG paths |
-| r1-inline-canvas | TIMEOUT | — | — | — | 32 MB JS literal dominates |
-| r2-async | 1701 | — | 228 | 304 | async sidecar, canvas renderer |
-| r3-preload | 1354 | — | 236 | 1540 | +`<link rel=preload>` |
-| r4-fade | 1358 | — | 220 | 1528 | +opacity fade-in (UX only) |
-| r5-gzip | **1329** | — | 224 | 1552 | +gzipped sidecar |
-| r6-chunked | 2568 | — | 212 | 660 | progressive addData, regression |
-| r7-canvas-direct | 57 871 | — | 268 | 57 968 | naive custom layer, broken |
-| r8-png-overlay | **329** | — | 232 | 656 | static PNG, non-interactive |
-| r9-png-then-vector | 1245 | **198** | 220 | **240** | PNG preview + vector swap |
+| Version | total (ms) | preview (ms) | FCP | LCP | LCP kind | notes |
+|---------|------------|--------------|-----|-----|----------|-------|
+| r0-inline-svg | TIMEOUT | — | — | — | — | 32 MB JS literal, 123 K SVG paths |
+| r1-inline-canvas | TIMEOUT | — | — | — | — | 32 MB JS literal dominates |
+| r2-async | 2316 | — | 452 | 664 | tile | async sidecar, canvas renderer |
+| r3-preload | **1349** | — | 416 | 1512 | tile | +`<link rel=preload>` |
+| r4-fade | 1330 | — | 392 | 1504 | tile | +opacity fade-in (UX only) |
+| r5-gzip | 1386 | — | 432 | 1544 | tile | +gzipped sidecar |
+| r6-chunked | 2475 | — | 396 | 852 | tile | progressive addData, regression |
+| r7-canvas-direct | 57 871 | — | 268 | 57 968 | tile | naive custom layer, broken |
+| r8-png-overlay | 1268 | — | 484 | 1524 | shadows | static PNG, non-interactive, noisy |
+| r9-png-then-vector | 1317 | **376** | 392 | **612** | shadows | PNG preview + vector swap |
+
+LCP kind matters: `tile` means the browser's LCP element was a CARTO
+basemap tile, not the shadow layer — so that LCP number is not a
+shadow-paint signal. Only r8 and r9 produce `kind=shadows`. For
+vector-only strategies, `addedAt` is the right "shadows are drawn"
+metric.
 
 ### Speedup chart (total addedAt)
 
 ```
 r0 ██████████████████████████████████████████ TIMEOUT
 r1 ██████████████████████████████████████████ TIMEOUT
-r2 █████████████                                1701 ms
-r3 ██████████                                    1354 ms  −20 % vs r2
-r4 ██████████                                    1358 ms  UX only
-r5 ██████████                                    1329 ms  ≈tied on LAN
-r6 ███████████████████                           2568 ms  regression
+r2 █████████████████                            2316 ms
+r3 ██████████                                   1349 ms  −42 % vs r2
+r4 ██████████                                   1330 ms  UX only
+r5 ██████████                                   1386 ms  ≈tied on LAN
+r6 ██████████████████                           2475 ms  regression
 r7 ██████████████████████████████████████████   57 871 ms  broken
-r8 ██                                             329 ms  non-interactive
-r9 █████████                                     1245 ms  (preview 198 ms)
+r8 █████████                                    1268 ms  (329 ms on a cleaner run — noisy)
+r9 █████████                                    1317 ms  (preview 376 ms)
 ```
 
 ### Biggest wins (ranked)
@@ -374,10 +404,10 @@ r9 █████████                                     1245 ms  (pre
 | Rank | Change | Savings | Technique |
 |---|---|---|---|
 | 1 | r0 → r2 | ∞ (any finite time is better than "never loads") | Stop embedding features in HTML. Async fetch of compact JSON sidecar. |
-| 2 | r2 → r3 | −347 ms on LAN (−1700 ms on a loaded host) | `<link rel=preload>` lets fetch overlap with Leaflet init. |
+| 2 | r2 → r3 | −967 ms | `<link rel=preload>` lets fetch overlap with Leaflet init. |
 | 3 | r4 → r5 | ≈tied on LAN (−652 ms on a loaded host) | Gzipped sidecar (28 MB → 3.9 MB). |
-| 4 | r5 → r8 | −1000 ms (but loses interactivity) | Server-side rasterization + `L.imageOverlay`. |
-| 5 | r8 + r5 → r9 | 198 ms preview in front of a 1.2 s vector | PNG-then-vector hybrid. LCP element = `IMG`. |
+| 4 | r5 → r9 | 376 ms preview vs 1386 ms empty-map wait | PNG preview landing before vector parse finishes. |
+| 5 | r9 LCP kind = `shadows` | Confirms preview IS the largest-contentful paint | The browser agrees with the design. |
 
 ### What didn't work as predicted
 
@@ -445,7 +475,7 @@ Even with r9, these are not small:
 ## Conclusion
 
 LightMap's client-side render went from **r0: fails to load** to
-**r9: 198 ms preview + 1.2 s full vector** at 100 % scale. The key
+**r9: ~350 ms preview + ~1.3 s full vector** at 100 % scale. The key
 insights:
 
 1. **Fighting the browser is expensive.** r0 and r1 both tried to
