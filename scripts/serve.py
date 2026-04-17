@@ -55,9 +55,19 @@ class GzipStaticHandler(SimpleHTTPRequestHandler):
         accepts_gz = "gzip" in (self.headers.get("Accept-Encoding", "") or "")
         gz_path = path + ".gz"
         if accepts_gz and os.path.isfile(gz_path) and os.path.isfile(path):
-            # Both the plain and .gz files exist. Serve the gz but label
-            # it with the plain file's content type so the browser knows
-            # what the decoded bytes mean.
+            # Both the plain and .gz files exist. Only serve the .gz if
+            # its mtime is at least as recent as the plain file's —
+            # otherwise a stale .gz from a previous build (e.g. when the
+            # plain sidecar was just regenerated without also re-gzipping)
+            # would mask the fresh content. The correct fallback in that
+            # case is to serve the plain file.
+            try:
+                if os.path.getmtime(gz_path) < os.path.getmtime(path):
+                    return super().send_head()
+            except OSError:
+                return super().send_head()
+            # Serve the gz but label it with the plain file's content
+            # type so the browser knows what the decoded bytes mean.
             try:
                 f = open(gz_path, "rb")
                 fs = os.fstat(f.fileno())
