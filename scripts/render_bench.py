@@ -67,18 +67,45 @@ def _fmt_ms(v) -> str:
     return "       -"
 
 
+def _fmt_ms_short(v) -> str:
+    if isinstance(v, (int, float)):
+        return f"{v:6.0f}"
+    return "     -"
+
+
+_REGRESSION_THRESHOLD = 1.50  # 50% over expected trips the regression flag
+
+
+def _regression_tag(actual, expected) -> str:
+    """Mark actual vs expected. 'ok' if within threshold, 'REGR +X%' otherwise.
+
+    Returns '' when expected is None (no budget configured).
+    """
+    if expected is None or actual is None:
+        return ""
+    if expected <= 0:
+        return ""
+    ratio = actual / expected
+    if ratio > _REGRESSION_THRESHOLD:
+        return f"REGR {ratio * 100 - 100:+.0f}%"
+    if ratio < 0.70:
+        return f"FAST {ratio * 100 - 100:+.0f}%"
+    return "ok"
+
+
 def print_suite_summary(results: list[dict]) -> None:
     print()
-    print("=" * 96)
+    print("=" * 120)
     print("RENDER BENCH SUITE SUMMARY")
-    print("=" * 96)
+    print("=" * 120)
     hdr = (
         f"  {'strategy':<18s}  {'ok':>3s}  "
         f"{'fetch':>8s}  {'parse+add':>10s}  {'preview':>8s}  "
-        f"{'total':>8s}  {'shadow':>14s}  {'err':>4s}  notes"
+        f"{'total':>8s}  {'vs exp':>8s}  {'FCP':>6s}  {'LCP':>6s}  "
+        f"{'shadow':>14s}  {'err':>4s}  notes"
     )
     print(hdr)
-    print("  " + "-" * 106)
+    print("  " + "-" * 130)
     for r in results:
         lm = r.get("lightmap") or {}
         fs = lm.get("fetchStart")
@@ -88,6 +115,9 @@ def print_suite_summary(results: list[dict]) -> None:
         fetch_dur = (fe - fs) if (fs is not None and fe is not None) else None
         parse_add = (added - fe) if (fe is not None and added is not None) else None
         total = added
+        paint = (r.get("timings") or {}).get("paint") or {}
+        fcp = paint.get("fcp")
+        lcp = paint.get("lcp")
 
         # Visual sanity: either we have a non-empty canvas overlay or
         # a loaded image overlay. Canvas strategies fill nz_pct; image
@@ -114,6 +144,17 @@ def print_suite_summary(results: list[dict]) -> None:
                     break
         err_count = len(r.get("errors") or [])
         ok_str = "yes" if r.get("ok") else "no"
+
+        # Regression vs expected_total_ms (and expected_preview_ms if set).
+        cfg = RENDER_STRATEGIES.get(r.get("strategy") or "") or {}
+        expected_total = cfg.get("expected_total_ms")
+        expected_preview = cfg.get("expected_preview_ms")
+        regr_total = _regression_tag(total, expected_total)
+        regr_preview = _regression_tag(preview_at, expected_preview)
+        regr_cell = regr_total or (
+            "no-bud" if expected_total is None else ""
+        )
+
         notes = ""
         if lm.get("status") and lm.get("status") != "done":
             notes = f"status={lm.get('status')}"
@@ -121,15 +162,22 @@ def print_suite_summary(results: list[dict]) -> None:
             notes += (" " if notes else "") + f"failed={len(r['requests_failed'])}"
         if r.get("fatal_error"):
             notes = (notes + " " if notes else "") + "TIMEOUT"
+        if regr_preview and regr_preview not in ("ok", ""):
+            notes = (notes + " " if notes else "") + f"preview={regr_preview}"
         print(
             f"  {r['label']:<18s}  {ok_str:>3s}  "
             f"{_fmt_ms(fetch_dur)}  {_fmt_ms(parse_add)}  "
             f"{_fmt_ms(preview_at)}  {_fmt_ms(total)}  "
+            f"{regr_cell:>8s}  "
+            f"{_fmt_ms_short(fcp)}  {_fmt_ms_short(lcp)}  "
             f"{shadow_visual:>14s}  {err_count:>4d}  {notes}"
         )
     print()
     print("  total   = addedAt (ms to fully interactive vector / final render)")
     print("  preview = previewAt (ms to first shadow pixels visible, r8/r9)")
+    print("  vs exp  = total vs expected_total_ms in RENDER_STRATEGIES.")
+    print("            ok = within +50%/-30%, REGR/FAST = outside, no-bud = None.")
+    print("  FCP/LCP = browser PerformanceObserver values at end of run.")
     print("  shadow  = cv <pct%> canvas nonzero or img <WxH> image overlay")
     print()
 

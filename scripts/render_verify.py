@@ -90,6 +90,38 @@ def run(url: str, label: str, viewport_w: int, viewport_h: int,
             viewport={"width": viewport_w, "height": viewport_h},
             device_scale_factor=1,
         )
+        # Install PerformanceObserver before any page script runs so FCP
+        # and LCP entries are not missed (buffered:true also catches
+        # entries that fired before the observer was registered).
+        context.add_init_script("""
+            (() => {
+              window.__lightmap_perf = {
+                fcp: null,
+                lcp: null,
+                lcp_element: null,
+                lcp_size: null,
+              };
+              try {
+                new PerformanceObserver((list) => {
+                  for (const e of list.getEntries()) {
+                    window.__lightmap_perf.lcp = e.startTime;
+                    window.__lightmap_perf.lcp_size = e.size;
+                    window.__lightmap_perf.lcp_element =
+                      e.element && e.element.tagName;
+                  }
+                }).observe({type: 'largest-contentful-paint', buffered: true});
+              } catch (e) {}
+              try {
+                new PerformanceObserver((list) => {
+                  for (const e of list.getEntries()) {
+                    if (e.name === 'first-contentful-paint') {
+                      window.__lightmap_perf.fcp = e.startTime;
+                    }
+                  }
+                }).observe({type: 'paint', buffered: true});
+              } catch (e) {}
+            })();
+        """)
         page = context.new_page()
 
         def on_console(msg):
@@ -172,6 +204,13 @@ def run(url: str, label: str, viewport_w: int, viewport_h: int,
         # Pull the lightmap harness state in full.
         lightmap = page.evaluate("window.__lightmap || null")
         result.lightmap = lightmap or {}
+
+        # Paint timings from the PerformanceObserver we installed before
+        # navigation. LCP reflects the latest largest-contentful element
+        # at the time of read; for shadow strategies this is typically
+        # the canvas or the PNG overlay once shadows land.
+        paint = page.evaluate("window.__lightmap_perf || null")
+        result.timings["paint"] = paint or {}
 
         # DOM summary: canvas elements, leaflet layers.
         dom_summary = page.evaluate("""
@@ -286,10 +325,18 @@ def print_summary(r: RenderResult) -> None:
     print(f"RENDER {r.label}   ok={r.ok}")
     print("=" * 64)
     nt = r.timings.get("navigation", {}) or {}
+    paint = r.timings.get("paint", {}) or {}
     lm = r.lightmap or {}
     print(f"  viewport:           {r.viewport['width']}x{r.viewport['height']}")
     print(f"  HTTP load:          {nt.get('load', 'n/a')} ms")
     print(f"  DOMContentLoaded:   {nt.get('domContentLoaded', 'n/a')} ms")
+    fcp = paint.get("fcp")
+    lcp = paint.get("lcp")
+    lcp_el = paint.get("lcp_element")
+    if fcp is not None:
+        print(f"  FCP:                {fcp:.0f} ms")
+    if lcp is not None:
+        print(f"  LCP:                {lcp:.0f} ms (element={lcp_el})")
     if lm:
         fs = lm.get("fetchStart")
         fe = lm.get("fetchEnd")
