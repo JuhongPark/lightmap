@@ -228,3 +228,12 @@ docs/prototype_r*.html
 # `.venv/bin/python scripts/render_verify.py`. The JSON result files
 # are kept tracked so timing history is preserved.
 benchmarks/render/**/*.png
+
+# Per-run verifier output dirs. A full bench suite emits one
+# `<ts>_suite/` dir (kept, holds the aggregated best-of-N JSONs)
+# plus many `<ts>_suite_<strategy>/` dirs (ignored, one per verify
+# run), plus one-off smoke / lcp-check dirs. Only the aggregated
+# suite output is worth version control.
+benchmarks/render/*_suite_*/
+benchmarks/render/*_smoke*/
+benchmarks/render/*_lcp*/
