@@ -116,6 +116,13 @@ def _shadow_feature(shadow_poly, height_ft, shadow_len_m):
                               preserve_topology=True)
     if simp.is_empty:
         simp = shadow_poly
+    # Dilate 4 m. Without this, the per-building convex-hull shadows
+    # leave multi-meter gaps between neighboring footprints (along
+    # MIT's tight alleys, sub-5 m wide), which render as bright strips
+    # exactly where the user expects continuous shade. 4 m closes the
+    # common alley widths (1-8 m) without visibly extending shadows
+    # into streets.
+    simp = simp.buffer(4.0 / 111000.0)
     coords = [
         (round(x, RENDER_COORD_PRECISION), round(y, RENDER_COORD_PRECISION))
         for x, y in simp.exterior.coords

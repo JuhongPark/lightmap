@@ -33,7 +33,13 @@ from folium.features import GeoJsonPopup
 from shadow.compute import render_shadows_png
 
 
-SHADOW_CMAP_COLORS = ["#cbd5e1", "#64748b", "#334155", "#0f172a"]
+# Three darker buckets. The earlier 4-bucket palette started at slate-300
+# (#cbd5e1) which at fillOpacity 0.45 tinted the basemap so faintly that
+# short-building shadows looked indistinguishable from sunny ground. That
+# produced a visual "sudden brightening" where a short building's shadow
+# met a taller building's clearly-gray shadow. Dropping the super-light
+# bucket keeps every shadow visibly darker than basemap.
+SHADOW_CMAP_COLORS = ["#64748b", "#334155", "#0f172a"]
 
 # Maximum-zoom-out viewport: MIT + Boston Financial District + Fenway,
 # which also defines the pannable area enforced by the map's maxBounds.
@@ -111,6 +117,79 @@ def _simplify_features(features, tol_deg):
 WIRE_COORD_PRECISION = 5
 
 
+def _merge_shadows_by_bucket(features, stops):
+    """Union shadows inside each color bucket into one geometry each.
+
+    Without this, each building produces one L.polygon ring. Where
+    neighboring same-bucket shadows abut, Leaflet's canvas anti-
+    aliasing draws each ring's edge with partial alpha, which shows
+    up as a 1-2 px bright seam along the shared boundary. Merging
+    into one geometry per bucket eliminates the shared edge entirely.
+
+    Returns a list of features, each with the bucket's threshold as
+    `height_ft` so the client-side `colorFor` maps to the intended
+    color. Splits MultiPolygon results back into individual Polygon
+    features so the on-wire format stays homogeneous (every feature
+    is a Polygon).
+    """
+    from shapely.geometry import shape as _shape, mapping as _mapping
+    from shapely.ops import unary_union as _unary_union
+
+    if not features or not stops:
+        return features
+
+    thresholds = [t for t, _ in stops]
+    def _bucket(h):
+        bi = 0
+        for i, t in enumerate(thresholds):
+            if h >= t:
+                bi = i
+        return bi
+
+    buckets = {i: [] for i in range(len(stops))}
+    for f in features:
+        props = f.get("properties") or {}
+        h = props.get("height_ft")
+        if h is None:
+            h = 0
+        geom = f.get("geometry") or {}
+        if geom.get("type") not in ("Polygon", "MultiPolygon"):
+            continue
+        try:
+            buckets[_bucket(float(h))].append(_shape(geom))
+        except Exception:
+            continue
+
+    out = []
+    for bi in range(len(stops)):
+        polys = buckets[bi]
+        if not polys:
+            continue
+        merged = _unary_union(polys)
+        if merged.is_empty:
+            continue
+        bucket_threshold = thresholds[bi]
+        geoms = []
+        if merged.geom_type == "Polygon":
+            geoms.append(merged)
+        elif merged.geom_type == "MultiPolygon":
+            geoms.extend(merged.geoms)
+        else:
+            # GeometryCollection edge case. Skip non-polygon parts.
+            for g in getattr(merged, "geoms", []):
+                if g.geom_type in ("Polygon", "MultiPolygon"):
+                    geoms.extend([g] if g.geom_type == "Polygon" else list(g.geoms))
+        for g in geoms:
+            if g.is_empty:
+                continue
+            out.append({
+                "type": "Feature",
+                "properties": {"height_ft": bucket_threshold},
+                "geometry": _mapping(g),
+            })
+    return out
+
+
 def _round_coords(obj, n):
     """Recursively round GeoJSON coordinate arrays to n decimal places."""
     if isinstance(obj, (list, tuple)):
@@ -120,33 +199,67 @@ def _round_coords(obj, n):
     return obj
 
 
+def _ring_is_ccw(ring):
+    """Shoelace. Returns True when ring wraps counterclockwise in
+    GeoJSON coords (lon=x, lat=y). Needed because canvas nonzero fill
+    rule cancels overlaps between mixed-winding rings, which shows up
+    as transparent holes where adjacent buildings touch.
+    """
+    if not ring or len(ring) < 3:
+        return True
+    area = 0.0
+    for i in range(len(ring) - 1):
+        x1, y1 = ring[i]
+        x2, y2 = ring[i + 1]
+        area += (x2 - x1) * (y2 + y1)
+    return area < 0
+
+
+def _normalize_polygon_winding(rings):
+    """Ensure exterior ring is CCW and interior rings are CW, so that
+    canvas-nonzero fill treats every polygon identically. The source
+    building geometries arrived with ~15 percent CW exterior rings,
+    which punched holes through their neighbors when batched into a
+    single L.polygon.
+    """
+    out = []
+    for i, ring in enumerate(rings):
+        want_ccw = (i == 0)
+        if _ring_is_ccw(ring) == want_ccw:
+            out.append(ring)
+        else:
+            out.append(list(reversed(ring)))
+    return out
+
+
 def _write_geojson(path, features, *, gzip_sidecar=False, simplify_tol_deg=None,
                    coord_precision=WIRE_COORD_PRECISION):
     if simplify_tol_deg:
         features = _simplify_features(features, simplify_tol_deg)
-    if coord_precision is not None:
-        features = [
-            {
-                "type": "Feature",
-                "properties": f.get("properties") or {},
-                "geometry": {
-                    "type": f["geometry"]["type"],
-                    "coordinates": _round_coords(
-                        f["geometry"]["coordinates"], coord_precision
-                    ),
-                },
-            }
-            for f in features
-        ]
+    cleaned = []
+    for feat in features:
+        geom = feat["geometry"]
+        coords = geom["coordinates"]
+        if coord_precision is not None:
+            coords = _round_coords(coords, coord_precision)
+        if geom["type"] == "Polygon":
+            coords = _normalize_polygon_winding(coords)
+        elif geom["type"] == "MultiPolygon":
+            coords = [_normalize_polygon_winding(p) for p in coords]
+        cleaned.append({
+            "type": "Feature",
+            "properties": feat.get("properties") or {},
+            "geometry": {"type": geom["type"], "coordinates": coords},
+        })
     with open(path, "w") as f:
         json.dump(
-            {"type": "FeatureCollection", "features": features},
+            {"type": "FeatureCollection", "features": cleaned},
             f, separators=(",", ":"),
         )
     if gzip_sidecar:
         with open(path, "rb") as src, _gzip.open(path + ".gz", "wb", 6) as dst:
             dst.writelines(src)
-    return len(features)
+    return len(cleaned)
 
 
 RENDER_STRATEGIES = {
@@ -362,7 +475,7 @@ def add_building_layer(m, building_data, *, out_dir, cfg=None):
     return L.polygon(latlngs, {{
       pane: 'buildings',
       color: '#475569', weight: 0.5,
-      fillColor: '#94a3b8', fillOpacity: 0.35,
+      fillColor: '#94a3b8', fillOpacity: 0.85,
     }});
   }}
   function _bComputeBbox(ring) {{
@@ -400,7 +513,7 @@ def add_building_layer(m, building_data, *, out_dir, cfg=None):
       pane: 'buildings',
       style: {
         color: '#475569', weight: 0.5,
-        fillColor: '#94a3b8', fillOpacity: 0.35,
+        fillColor: '#94a3b8', fillOpacity: 0.85,
       },
       onEachFeature: bindBuildingPopup,
     });
@@ -424,7 +537,10 @@ def add_building_layer(m, building_data, *, out_dir, cfg=None):
     }}
     if (!{map_var}.getPane('buildings')) {{
       var pane = {map_var}.createPane('buildings');
-      pane.style.zIndex = 390;
+      // zIndex 410 puts buildings above the default overlayPane (400)
+      // where shadows live. Buildings should read as opaque roofs on
+      // top of the ground-level shadow layer, not be dimmed by it.
+      pane.style.zIndex = 410;
     }}
     var initialLayer = null;
     // Stage 1: fetch the MIT-area initial chunk. Small, fast.
@@ -538,36 +654,46 @@ def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg, out_dir):
                 polys.append(_shape(geom))
             except Exception:
                 continue
-    # Preview PNG: 10 m grid at higher opacity. At 20 m the shadows
-    # visually blend into the light CARTO basemap at typical zoom (13-15)
-    # and the user reported "preview invisible". 10 m stays lightweight
-    # (~200 KB) but is crisp enough to register, and alpha=180/255 (~70 %)
-    # makes it clearly visible against the basemap.
+    # Primary-visual PNG: 2 m grid is the sweet spot between file size
+    # (a few MB) and sharpness at zoom 18-19. This PNG stays on the map
+    # permanently; the vector layer ships only for click / popup and
+    # is drawn invisible. Raster rendering is what every professional
+    # shadow tool uses (ShadeMap, Shadowmap, NYU Shadow Accrual Maps,
+    # Deep Umbra) precisely because it eliminates the polygon-seam
+    # artifacts that the vector approach has along every shared edge.
     _W, _H, bounds = render_shadows_png(
-        polys, png_path, resolution_m=10.0, alpha=180,
+        polys, png_path, resolution_m=2.0, alpha=140,
     )
     bounds_js = json.dumps(bounds)
 
     simplify_tol = cfg.get("simplify_tol_deg")
 
-    # Full sidecar (all 123 K shadows at scale=100).
+    # Merge shadows per color bucket into single geometries each so
+    # neighboring same-color shadows share one path. Removes canvas-AA
+    # seams that render as bright 1-2 px strips along abutting edges.
+    merge_stops = shadow_color_stops_for_js(cmap)
+    merged_full = _merge_shadows_by_bucket(shadows, merge_stops)
+    print(f"  Shadow merge: {len(shadows)} features -> {len(merged_full)} "
+          f"merged (by color bucket)")
+
+    # Full sidecar.
     sidecar_name = "shadows.geojson"
     sidecar_path = os.path.join(out_dir, sidecar_name)
     _write_geojson(
-        sidecar_path, shadows,
+        sidecar_path, merged_full,
         gzip_sidecar=bool(cfg.get("gzip_sidecar")),
         simplify_tol_deg=simplify_tol,
     )
 
     # Initial chunk: only features intersecting INITIAL_BBOX (~MIT campus).
-    # A small file (~100 KB) that fetches in a fraction of the time the
-    # full sidecar takes to parse, so the user sees interactive shadows
-    # on the initial viewport within ~300 ms.
+    # Filter first (on per-building shadows) so the bbox intersection
+    # is accurate, then merge within the filtered set.
     initial_name = "shadows_initial.geojson"
     initial_path = os.path.join(out_dir, initial_name)
     initial_features = _filter_features_by_bbox(shadows, INITIAL_BBOX)
+    merged_initial = _merge_shadows_by_bucket(initial_features, merge_stops)
     _write_geojson(
-        initial_path, initial_features,
+        initial_path, merged_initial,
         gzip_sidecar=bool(cfg.get("gzip_sidecar")),
         simplify_tol_deg=simplify_tol,
     )
@@ -642,6 +768,13 @@ def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg, out_dir):
         # only a handful of Leaflet objects instead of 123 K. Trade-off:
         # click does not surface per-feature info; the whole color group
         # acts as one clickable layer.
+        #
+        # Drawing order matters: the last L.polygon addTo'd ends up on
+        # top. We iterate `stops` (light → dark) so the darkest shadow
+        # bucket is painted last and sits on top when shadows overlap.
+        # Without this, Object.keys(byColor) follows insertion order and
+        # can leave a lighter bucket on top, making it visually "cut"
+        # into neighboring darker shadows.
         mk_shadow_js = f"""
   function mkShadowLayer(data) {{
     var byColor = {{}};
@@ -660,11 +793,18 @@ def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg, out_dir):
       byColor[c].push(latlngs);
     }}
     var grp = L.layerGroup();
-    Object.keys(byColor).forEach(function(c) {{
+    // Vector shadow layer renders INVISIBLE. The PNG overlay is the
+    // primary visual. Features still exist here so the PIP click
+    // handler can resolve per-feature height/shadow-length popups,
+    // but any fill would paint its own polygon seams on top of the
+    // clean PNG — so fillOpacity and weight are both zero.
+    for (var si = 0; si < stops.length; si++) {{
+      var c = stops[si][1];
+      if (!byColor[c] || byColor[c].length === 0) continue;
       L.polygon(byColor[c], {{
-        fillColor: c, color: c, weight: 0.3, fillOpacity: 0.45,
+        fillColor: c, color: c, weight: 0, fillOpacity: 0,
       }}).addTo(grp);
-    }});
+    }}
     return grp;
   }}
 """
@@ -800,8 +940,9 @@ def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg, out_dir):
       setTimeout(addPreviewAndVector, 50);
       return;
     }}
-    // Stage 1: PNG preview overlay. Covers the full study area so the
-    // user sees something within ~400 ms while the vector layers fetch.
+    // PNG is the primary shadow visual. Stays on the map permanently.
+    // Vector features still load (for PIP click / popup) but render
+    // invisible so they contribute no pixels and produce no seams.
     var preview = L.imageOverlay('{png_name}', {bounds_js}, {{
       opacity: 1.0, interactive: false,
     }});
@@ -825,9 +966,8 @@ def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg, out_dir):
           window._sh_feats = _indexFeatures(data.features || []);
           _installPipClick();
         }}
-        setTimeout(function() {{
-          {map_var}.removeLayer(preview);
-        }}, 300);
+        // Do NOT remove preview. PNG is the permanent visual;
+        // the vector layer renders with fillOpacity=0 below.
         mark('initialAt');
         // Defer the full fetch to the next macrotask so the browser
         // paints the initial layer before we start downloading+parsing
