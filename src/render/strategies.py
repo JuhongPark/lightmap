@@ -40,8 +40,10 @@ SHADOW_CMAP_COLORS = ["#cbd5e1", "#64748b", "#334155", "#0f172a"]
 # Features inside this box are pre-filtered into a small sidecar so the
 # first paint shows interactive shadows + buildings across every area
 # the user can see, without waiting for the full 123 K-feature sidecar.
-# (south, west, north, east)
-INITIAL_BBOX = (42.340, -71.110, 42.370, -71.045)
+# Box covers MIT + Cambridge core + Back Bay + Boston downtown + Financial
+# District. Sized so users can pan a useful distance before the full
+# fetch resolves. (south, west, north, east)
+INITIAL_BBOX = (42.335, -71.130, 42.385, -71.040)
 
 
 def _feature_bbox(feature):
