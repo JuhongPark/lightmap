@@ -180,9 +180,13 @@ data/
 # Generated shadow and building sidecars
 docs/shadows.geojson
 docs/shadows.geojson.gz
+docs/shadows_initial.geojson
+docs/shadows_initial.geojson.gz
 docs/shadows.png
 docs/buildings.geojson
 docs/buildings.geojson.gz
+docs/buildings_initial.geojson
+docs/buildings_initial.geojson.gz
 
 # Per-strategy HTML variants
 docs/prototype_r*.html

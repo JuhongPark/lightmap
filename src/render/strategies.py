@@ -35,6 +35,56 @@ from shadow.compute import render_shadows_png
 
 SHADOW_CMAP_COLORS = ["#cbd5e1", "#64748b", "#334155", "#0f172a"]
 
+# Initial viewport: MIT campus + a little surrounding area. Features
+# inside this box are pre-filtered into a small sidecar so the first
+# paint shows shadows + buildings within a few hundred ms; the full
+# set (123 K features) is still preloaded but at low priority and
+# swapped in once it arrives.
+# (south, west, north, east)
+INITIAL_BBOX = (42.355, -71.100, 42.365, -71.086)
+
+
+def _feature_bbox(feature):
+    """Return (s, w, n, e) for a GeoJSON feature, or None if unusable."""
+    geom = feature.get("geometry") or {}
+    t = geom.get("type")
+    coords = geom.get("coordinates") or []
+    if t == "Polygon":
+        ring = coords[0] if coords else []
+    elif t == "MultiPolygon":
+        ring = coords[0][0] if (coords and coords[0]) else []
+    else:
+        return None
+    if not ring:
+        return None
+    xs = [p[0] for p in ring]
+    ys = [p[1] for p in ring]
+    return (min(ys), min(xs), max(ys), max(xs))
+
+
+def _bbox_intersects(a, b):
+    return not (a[2] < b[0] or a[0] > b[2] or a[3] < b[1] or a[1] > b[3])
+
+
+def _filter_features_by_bbox(features, bbox):
+    out = []
+    for f in features:
+        fb = _feature_bbox(f)
+        if fb is not None and _bbox_intersects(fb, bbox):
+            out.append(f)
+    return out
+
+
+def _write_geojson(path, features, *, gzip_sidecar=False):
+    with open(path, "w") as f:
+        json.dump(
+            {"type": "FeatureCollection", "features": features},
+            f, separators=(",", ":"),
+        )
+    if gzip_sidecar:
+        with open(path, "rb") as src, _gzip.open(path + ".gz", "wb", 6) as dst:
+            dst.writelines(src)
+
 
 RENDER_STRATEGIES = {
     "r0-inline-svg": {
@@ -146,38 +196,33 @@ DEFAULT_RENDER_STRATEGY = "r9-png-then-vector"
 def add_building_layer(m, building_data, *, out_dir):
     """Write building footprints as an async sidecar and render on canvas.
 
-    At scale=100 the building set (~123 K polygons) is too large to inline
-    into the HTML, and Leaflet's SVG renderer chokes on that many DOM
-    nodes. We write the features to `docs/buildings.geojson` (compact
-    JSON + gzip sidecar), preload the .geojson during HTML parse, and
-    fetch+render on canvas so every building is visible and clickable —
-    the popup shows height in feet.
-
-    Buildings are rendered under the shadow layer (L.geoJSON `pane` +
-    explicit `zIndex`) so they stay visible through the semi-transparent
-    shadow canvas.
+    Two-stage load: a small `buildings_initial.geojson` contains only
+    the features intersecting INITIAL_BBOX (~MIT campus). It is fetched
+    with high priority and drawn within a few hundred ms. The full
+    `buildings.geojson` preloads at low priority and replaces the
+    initial layer once it arrives.
     """
     features = (building_data or {}).get("features") or []
     if not features:
         return
 
-    sidecar_name = "buildings.geojson"
-    sidecar_path = os.path.join(out_dir, sidecar_name)
-    with open(sidecar_path, "w") as f:
-        json.dump(
-            {"type": "FeatureCollection", "features": features},
-            f,
-            separators=(",", ":"),
-        )
-    gz_path = sidecar_path + ".gz"
-    with open(sidecar_path, "rb") as src, _gzip.open(gz_path, "wb", 6) as dst:
-        dst.writelines(src)
+    full_name = "buildings.geojson"
+    full_path = os.path.join(out_dir, full_name)
+    _write_geojson(full_path, features, gzip_sidecar=True)
 
-    # Preload during HTML parse so the fetch overlaps with Leaflet init.
+    initial_features = _filter_features_by_bbox(features, INITIAL_BBOX)
+    initial_name = "buildings_initial.geojson"
+    initial_path = os.path.join(out_dir, initial_name)
+    _write_geojson(initial_path, initial_features, gzip_sidecar=True)
+
+    # Only the initial chunk is preloaded. The 4 MB full file is
+    # fetched sequentially after the initial layer renders — otherwise
+    # its JSON.parse blocks the main thread and the small initial
+    # chunk's promise can't resolve in time.
     preload_hint = (
-        f'<link rel="preload" href="{sidecar_name}" as="fetch" '
+        f'<link rel="preload" href="{initial_name}" as="fetch" '
         f'type="application/geo+json" crossorigin="anonymous" '
-        f'fetchpriority="low">'
+        f'fetchpriority="high">'
     )
     m.get_root().header.add_child(folium.Element(preload_hint))
 
@@ -185,42 +230,63 @@ def add_building_layer(m, building_data, *, out_dir):
     script = f"""
 <script>
 (function() {{
+  var buildingStyle = {{
+    color: '#475569', weight: 0.5,
+    fillColor: '#94a3b8', fillOpacity: 0.35,
+  }};
+  function bindBuildingPopup(feat, layer) {{
+    var h = feat.properties && feat.properties.BLDG_HGT_2010;
+    var html = '<div style="font-size:12px;">'
+      + '<b>Building</b><br>'
+      + 'Height: ' + (h != null ? h + ' ft' : 'unknown')
+      + '</div>';
+    layer.bindPopup(html);
+  }}
+  function mkBuildingLayer(data) {{
+    return L.geoJSON(data, {{
+      pane: 'buildings',
+      style: buildingStyle,
+      onEachFeature: bindBuildingPopup,
+    }});
+  }}
   function addBuildings() {{
     if (typeof {map_var} === 'undefined') {{
       setTimeout(addBuildings, 50);
       return;
     }}
-    // Dedicated pane below the shadow layer so buildings stay visible
-    // behind the semi-transparent shadow canvas.
     if (!{map_var}.getPane('buildings')) {{
       var pane = {map_var}.createPane('buildings');
       pane.style.zIndex = 390;
     }}
-    fetch('{sidecar_name}')
+    var initialLayer = null;
+    // Stage 1: fetch the MIT-area initial chunk. Small, fast.
+    fetch('{initial_name}')
       .then(function(r) {{ return r.json(); }})
       .then(function(data) {{
-        L.geoJSON(data, {{
-          pane: 'buildings',
-          style: {{
-            color: '#475569',
-            weight: 0.5,
-            fillColor: '#94a3b8',
-            fillOpacity: 0.35,
-          }},
-          onEachFeature: function(feat, layer) {{
-            var h = feat.properties && feat.properties.BLDG_HGT_2010;
-            var html = '<div style="font-size:12px;">'
-              + '<b>Building</b><br>'
-              + 'Height: ' + (h != null ? h + ' ft' : 'unknown')
-              + '</div>';
-            layer.bindPopup(html);
-          }},
-        }}).addTo({map_var});
-        window.__lightmap_buildings_ready = performance.now();
+        initialLayer = mkBuildingLayer(data).addTo({map_var});
+        window.__lightmap_buildings_initial_at = performance.now();
+        // Defer the full fetch so the initial layer paints before the
+        // 4 MB full set downloads+parses and blocks the main thread.
+        setTimeout(fetchFull, 0);
       }})
       .catch(function(err) {{
-        console.error('failed to load buildings:', err);
+        console.error('buildings_initial failed:', err);
+        fetchFull();
       }});
+
+    function fetchFull() {{
+      // Stage 2: fetch the full set. Swap out the initial layer on arrival.
+      fetch('{full_name}')
+        .then(function(r) {{ return r.json(); }})
+        .then(function(data) {{
+          var full = mkBuildingLayer(data).addTo({map_var});
+          if (initialLayer) {{ {map_var}.removeLayer(initialLayer); }}
+          window.__lightmap_buildings_ready = performance.now();
+        }})
+        .catch(function(err) {{
+          console.error('buildings full failed:', err);
+        }});
+    }}
   }}
   addBuildings();
 }})();
@@ -314,34 +380,38 @@ def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg, out_dir):
     )
     bounds_js = json.dumps(bounds)
 
+    # Full sidecar (all 123 K shadows at scale=100).
     sidecar_name = "shadows.geojson"
     sidecar_path = os.path.join(out_dir, sidecar_name)
-    with open(sidecar_path, "w") as f:
-        json.dump(
-            {"type": "FeatureCollection", "features": shadows},
-            f,
-            separators=(",", ":"),
-        )
-    if cfg.get("gzip_sidecar"):
-        with open(sidecar_path, "rb") as src, _gzip.open(
-            sidecar_path + ".gz", "wb", 6
-        ) as dst:
-            dst.writelines(src)
+    _write_geojson(
+        sidecar_path, shadows, gzip_sidecar=bool(cfg.get("gzip_sidecar")),
+    )
 
-    # Preload the PNG preview at high priority so the HTML preload
-    # scanner kicks it off during parse, before even the Leaflet JS
-    # loads. Also preload the vector sidecar at low priority so it
-    # starts after the PNG but still overlaps with Leaflet init.
+    # Initial chunk: only features intersecting INITIAL_BBOX (~MIT campus).
+    # A small file (~100 KB) that fetches in a fraction of the time the
+    # full sidecar takes to parse, so the user sees interactive shadows
+    # on the initial viewport within ~300 ms.
+    initial_name = "shadows_initial.geojson"
+    initial_path = os.path.join(out_dir, initial_name)
+    initial_features = _filter_features_by_bbox(shadows, INITIAL_BBOX)
+    _write_geojson(
+        initial_path, initial_features,
+        gzip_sidecar=bool(cfg.get("gzip_sidecar")),
+    )
+
+    # Preload hints: only the PNG + the initial chunk are preloaded.
+    # The full sidecar is deliberately NOT preloaded — starting its
+    # fetch+parse in parallel with the initial chunk would block the
+    # main thread on a 28 MB JSON.parse before the initial chunk's
+    # promise could resolve. We fetch the full set in the background
+    # only AFTER the initial layer has rendered.
     hints = [
         f'<link rel="preload" href="{png_name}" as="image" '
         f'fetchpriority="high">',
+        f'<link rel="preload" href="{initial_name}" as="fetch" '
+        f'type="application/geo+json" crossorigin="anonymous" '
+        f'fetchpriority="high">',
     ]
-    if cfg.get("preload"):
-        hints.append(
-            f'<link rel="preload" href="{sidecar_name}" as="fetch" '
-            f'type="application/geo+json" crossorigin="anonymous" '
-            f'fetchpriority="low">'
-        )
     for h in hints:
         m.get_root().header.add_child(folium.Element(h))
 
@@ -378,56 +448,86 @@ def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg, out_dir):
     fetchStart: null,
     fetchEnd: null,
     previewAt: null,
+    initialAt: null,
     addedAt: null,
     featureCount: null,
+    initialFeatureCount: null,
     status: 'pending',
   }};
   function mark(name) {{ window.__lightmap[name] = performance.now(); }}
+  function mkShadowLayer(data) {{
+    return L.geoJSON(data, {{
+      style: styleFn,
+      onEachFeature: bindShadowPopup,
+    }});
+  }}
 
   function addPreviewAndVector() {{
     if (typeof {map_var} === 'undefined') {{
       setTimeout(addPreviewAndVector, 50);
       return;
     }}
-    // Stage 1: PNG preview overlay.
+    // Stage 1: PNG preview overlay. Covers the full study area so the
+    // user sees something within ~400 ms while the vector layers fetch.
     var preview = L.imageOverlay('{png_name}', {bounds_js}, {{
       opacity: 1.0, interactive: false,
     }});
     preview.on('load', function() {{ mark('previewAt'); }});
     preview.addTo({map_var});
 
-    // Stage 2: fetch the vector sidecar in the background. Replaces
-    // the preview as soon as it is drawn.
+    var initialLayer = null;
     window.__lightmap.status = 'fetching';
     mark('fetchStart');
-    fetch('{sidecar_name}')
+
+    // Stage 2: fetch the INITIAL chunk (MIT-area features only).
+    // Small + fast -> interactive shadows within the viewport in ~500 ms.
+    // We wait for this to render before starting Stage 3 so the 28 MB
+    // JSON.parse of the full sidecar does not block this callback.
+    fetch('{initial_name}')
       .then(function(r) {{ return r.json(); }})
       .then(function(data) {{
-        mark('fetchEnd');
-        window.__lightmap.featureCount = (data && data.features) ? data.features.length : 0;
-        var layer = L.geoJSON(data, {{
-          style: styleFn,
-          onEachFeature: bindShadowPopup,
-        }}).addTo({map_var});
-        var cvs = layer._renderer && layer._renderer._container;
-        if (cvs) {{
-          cvs.style.transition = 'opacity 300ms ease-out';
-          cvs.style.opacity = '0';
-          requestAnimationFrame(function(){{ cvs.style.opacity = '1'; }});
-        }}
-        // Remove the PNG preview on the next frame so the swap is
-        // visually seamless.
+        window.__lightmap.initialFeatureCount = (data.features || []).length;
+        initialLayer = mkShadowLayer(data).addTo({map_var});
         setTimeout(function() {{
           {map_var}.removeLayer(preview);
         }}, 300);
-        window.__lightmap.status = 'done';
-        mark('addedAt');
+        mark('initialAt');
+        // Defer the full fetch to the next macrotask so the browser
+        // paints the initial layer before we start downloading+parsing
+        // the 28 MB full sidecar.
+        setTimeout(fetchFull, 0);
       }})
       .catch(function(err) {{
-        window.__lightmap.status = 'error';
-        window.__lightmap.error = String(err);
-        console.error('failed to load shadows:', err);
+        console.error('shadows_initial failed:', err);
+        fetchFull();
       }});
+
+    function fetchFull() {{
+      // Stage 3: fetch the FULL sidecar in the background and swap in
+      // once it arrives. The initial layer is removed to avoid double
+      // rendering (the full set is a superset).
+      fetch('{sidecar_name}')
+        .then(function(r) {{ return r.json(); }})
+        .then(function(data) {{
+          mark('fetchEnd');
+          window.__lightmap.featureCount = (data && data.features) ? data.features.length : 0;
+          var full = mkShadowLayer(data).addTo({map_var});
+          var cvs = full._renderer && full._renderer._container;
+          if (cvs) {{
+            cvs.style.transition = 'opacity 300ms ease-out';
+            cvs.style.opacity = '0';
+            requestAnimationFrame(function(){{ cvs.style.opacity = '1'; }});
+          }}
+          if (initialLayer) {{ {map_var}.removeLayer(initialLayer); }}
+          window.__lightmap.status = 'done';
+          mark('addedAt');
+        }})
+        .catch(function(err) {{
+          window.__lightmap.status = 'error';
+          window.__lightmap.error = String(err);
+          console.error('shadows full failed:', err);
+        }});
+    }}
   }}
   addPreviewAndVector();
 }})();

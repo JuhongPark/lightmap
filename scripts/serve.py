@@ -36,7 +36,7 @@ import argparse
 import os
 import sys
 from http import HTTPStatus
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -92,7 +92,9 @@ def run(port: int, root: str) -> None:
         print(f"error: {root} is not a directory", file=sys.stderr)
         sys.exit(2)
     os.chdir(root)
-    server = HTTPServer(("", port), GzipStaticHandler)
+    # ThreadingHTTPServer so small initial sidecars are not blocked
+    # behind a 4 MB full sidecar on the single request handler.
+    server = ThreadingHTTPServer(("", port), GzipStaticHandler)
     print(f"serving {root} on http://localhost:{port}/ (gzip-aware)")
     try:
         server.serve_forever()

@@ -65,7 +65,7 @@ def _postgis_enabled():
         return False
 
 BOSTON_TZ = ZoneInfo("US/Eastern")
-MAP_CENTER = [42.36, -71.08]
+MAP_CENTER = [42.3601, -71.0942]  # MIT Kresge Oval, inside INITIAL_BBOX
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "docs")
 
@@ -367,7 +367,7 @@ def _create_base_map(tiles="CartoDB positron", *, prefer_canvas=True):
     # a DOM node. Canvas draws them into a single <canvas> element, so
     # the browser handles the map smoothly even at the full city scale.
     m = folium.Map(
-        location=MAP_CENTER, zoom_start=14, tiles=tiles,
+        location=MAP_CENTER, zoom_start=16, tiles=tiles,
         width="100%", height="100%",
         prefer_canvas=prefer_canvas,
     )
