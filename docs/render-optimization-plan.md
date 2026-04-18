@@ -18,9 +18,9 @@ This document is the story of that second half.
 
 Each row lists the single key change that version introduced on top of
 the previous one. The strategy names (`r0-inline-svg` through
-`r9-png-then-vector`) correspond to entries in
-`RENDER_STRATEGIES` in `src/render/strategies.py`. Keys never move or
-disappear — history is the point.
+`r13-hybrid`) correspond to entries in `RENDER_STRATEGIES` in
+`src/render/strategies.py`. Keys never move or disappear — history is
+the point.
 
 | Version | Key change | Why it matters |
 |---------|------------|----------------|
@@ -34,6 +34,11 @@ disappear — history is the point.
 | r7 | Custom `CanvasLayer` with `latLngToContainerPoint` per vertex | Naive hand-rolled renderer. Disastrous at 123 K polygons (~97 s). Kept as cautionary tale. |
 | r8 | Server-side Pillow PNG + `L.imageOverlay` | Skip client geometry parsing entirely. Fastest time-to-first-pixel (~400 ms) but non-interactive. |
 | r9 | r8 PNG preview → swap in r4-style async canvas vector | Combine r8's fast preview with r4's interactive vector layer. PNG flashes in ~350 ms, full vector arrives by ~1.9 s. |
+| r9++ | MIT viewport-first + deferred full fetch + threaded server | INITIAL\_BBOX pre-filter (MIT campus features in a 14 KB sidecar). Initial shadows in 331 ms; full set streamed after. Shipped via `docs/shadows_initial.geojson(.gz)` and `docs/buildings_initial.geojson(.gz)`. |
+| r10 | r9 + polygon simplify at 3 m tolerance | 33 % faster (~2.3 s) by dropping low-information vertices before serialize. Shadow/building count unchanged, so L.Polygon instantiation cost unchanged. |
+| r11 | r9 + `L.vectorGrid.slicer` | Drop-in Leaflet plugin that slices GeoJSON into tiles on the client and renders without per-feature `L.Polygon`. Expected big win, actual: CDN load penalty + per-tile slicing overhead caps the gain at ~1.3× faster. |
+| r12 | r9 + color-batched single `L.polygon` per color | One Leaflet polygon per fill color (~4 total) instead of 123 K. **2.7× faster** (~1.3 s). Tradeoff: no per-feature click popup. |
+| r13 | r12 + point-in-polygon click handler (**current default**) | Keep r12's rendering speed, add a ~10-line ray-cast PIP handler with a pre-computed bbox index. Full 123 K features become clickable for ~1 ms per click. 1.8 s total, 332 ms preview, click works. |
 
 ## Benchmark Environment
 
@@ -361,42 +366,49 @@ user sees.
 
 ## Final Comparison
 
-Best-of-3 numbers at scale=100 from `20260417_183337_suite`. r7 is
-from `20260417_151735_suite` (skipped in the latest run due to its
-~1 min per-run cost).
+Best-of-3 numbers at scale=100 on WSL2 localhost. r0/r1 timeouts and
+r7 broken-baseline are from older suites. r2–r9 are from
+`20260417_183337_suite`. r10–r13 candidate comparison is from suites
+`20260418_002044`, `20260418_003655`, and `20260418_012935` (each
+strategy was measured in the suite where it was the focus of that
+run).
 
-| Version | total (ms) | preview (ms) | FCP | LCP | LCP kind | notes |
-|---------|------------|--------------|-----|-----|----------|-------|
-| r0-inline-svg | TIMEOUT | — | — | — | — | 32 MB JS literal, 123 K SVG paths |
-| r1-inline-canvas | TIMEOUT | — | — | — | — | 32 MB JS literal dominates |
-| r2-async | 2316 | — | 452 | 664 | tile | async sidecar, canvas renderer |
-| r3-preload | **1349** | — | 416 | 1512 | tile | +`<link rel=preload>` |
-| r4-fade | 1330 | — | 392 | 1504 | tile | +opacity fade-in (UX only) |
-| r5-gzip | 1386 | — | 432 | 1544 | tile | +gzipped sidecar |
-| r6-chunked | 2475 | — | 396 | 852 | tile | progressive addData, regression |
-| r7-canvas-direct | 57 871 | — | 268 | 57 968 | tile | naive custom layer, broken |
-| r8-png-overlay | 1268 | — | 484 | 1524 | shadows | static PNG, non-interactive, noisy |
-| r9-png-then-vector | 1317 | **376** | 392 | **612** | shadows | PNG preview + vector swap |
+| Version | total (ms) | preview (ms) | FCP | LCP | LCP kind | click | notes |
+|---------|------------|--------------|-----|-----|----------|:---:|-------|
+| r0-inline-svg | TIMEOUT | — | — | — | — | — | 32 MB JS literal, 123 K SVG paths |
+| r1-inline-canvas | TIMEOUT | — | — | — | — | — | 32 MB JS literal dominates |
+| r2-async | 2316 | — | 452 | 664 | tile | ✓ | async sidecar, canvas renderer |
+| r3-preload | 1349 | — | 416 | 1512 | tile | ✓ | +`<link rel=preload>` |
+| r4-fade | 1330 | — | 392 | 1504 | tile | ✓ | +opacity fade-in (UX only) |
+| r5-gzip | 1386 | — | 432 | 1544 | tile | ✓ | +gzipped sidecar |
+| r6-chunked | 2475 | — | 396 | 852 | tile | ✓ | progressive addData, regression |
+| r7-canvas-direct | 57 871 | — | 268 | 57 968 | tile | ✓ | naive custom layer, broken |
+| r8-png-overlay | 1268 | — | 484 | 1524 | shadows | ✗ | static PNG, non-interactive, noisy |
+| r9-png-then-vector | 3422 | 205 | 220 | 732 | tile | ✓ | PNG preview + L.geoJSON vector |
+| r10-simplify | 2305 | 253 | 200 | 704 | tile | ✓ | r9 + simplify(3 m); ~33 % faster |
+| r11-vectorgrid | 2621 | 647 | 424 | 732 | tile | ✓* | r9 + `L.vectorGrid.slicer`; CDN cost hurts |
+| r12-colorbatch | **1282** | 412 | 224 | 500 | tile | ✗ | r9 + one `L.polygon` per color; fastest but no click |
+| r13-hybrid | 1803 | **332** | 300 | 696 | tile | ✓ | r12 + PIP click handler; **current default** |
 
 LCP kind matters: `tile` means the browser's LCP element was a CARTO
 basemap tile, not the shadow layer — so that LCP number is not a
-shadow-paint signal. Only r8 and r9 produce `kind=shadows`. For
-vector-only strategies, `addedAt` is the right "shadows are drawn"
-metric.
+shadow-paint signal. At zoom 16 on the MIT viewport the basemap tile
+is the dominant paint for every strategy except r8. For vector-only
+strategies, `addedAt` is the right "shadows are drawn" metric.
 
-### Speedup chart (total addedAt)
+*r11 click uses VectorGrid's own event model (`layer.on('click', e =>
+e.layer.properties)`) rather than a per-feature popup.
+
+### Speedup chart (total addedAt, scale=100 at MIT zoom 16 with buildings on)
 
 ```
-r0 ██████████████████████████████████████████ TIMEOUT
-r1 ██████████████████████████████████████████ TIMEOUT
-r2 █████████████████                            2316 ms
-r3 ██████████                                   1349 ms  −42 % vs r2
-r4 ██████████                                   1330 ms  UX only
-r5 ██████████                                   1386 ms  ≈tied on LAN
-r6 ██████████████████                           2475 ms  regression
-r7 ██████████████████████████████████████████   57 871 ms  broken
-r8 █████████                                    1268 ms  (329 ms on a cleaner run — noisy)
-r9 █████████                                    1317 ms  (preview 376 ms)
+r0  ██████████████████████████████████████████ TIMEOUT
+r1  ██████████████████████████████████████████ TIMEOUT
+r9  ████████████████████████                    3422 ms  baseline (vector + PIP buildings)
+r10 ████████████████                            2305 ms  −33 % vs r9  (simplify 3 m)
+r11 ██████████████████                          2621 ms  −23 % vs r9  (VectorGrid, CDN cost)
+r12 █████████                                   1282 ms  **−62 % vs r9** (colorbatch, no click)
+r13 █████████████                               1803 ms  −47 % vs r9, **click kept**
 ```
 
 ### Biggest wins (ranked)
@@ -405,9 +417,10 @@ r9 █████████                                    1317 ms  (prev
 |---|---|---|---|
 | 1 | r0 → r2 | ∞ (any finite time is better than "never loads") | Stop embedding features in HTML. Async fetch of compact JSON sidecar. |
 | 2 | r2 → r3 | −967 ms | `<link rel=preload>` lets fetch overlap with Leaflet init. |
-| 3 | r4 → r5 | ≈tied on LAN (−652 ms on a loaded host) | Gzipped sidecar (28 MB → 3.9 MB). |
-| 4 | r5 → r9 | 376 ms preview vs 1386 ms empty-map wait | PNG preview landing before vector parse finishes. |
-| 5 | r9 LCP kind = `shadows` | Confirms preview IS the largest-contentful paint | The browser agrees with the design. |
+| 3 | r9 viewport-first | 3 s → 331 ms for MIT area | Pre-filter features into `shadows_initial.geojson` and render that before fetching the full 28 MB set. |
+| 4 | **r9 → r13 colorbatch + PIP** | **3422 ms → 1803 ms (−47 %)** | Replace 123 K `L.Polygon` instantiations with 4 color-batched polygons. Click via ray-cast PIP on a pre-computed bbox index. |
+| 5 | r5 → r9 | 376 ms preview vs 1386 ms empty-map wait | PNG preview landing before vector parse finishes. |
+| 6 | LCP element classification | Tag-only `IMG` was ambiguous | `lcp_kind` (shadows / tile / other) distinguishes shadow-paint LCP from basemap-tile LCP. |
 
 ### What didn't work as predicted
 
@@ -421,6 +434,13 @@ r9 █████████                                    1317 ms  (prev
 - **r8 PNG overlay was supposed to be the endgame**. It is the fastest
   path to first pixel by a wide margin, but non-interactive. This
   triggered r9 as the actual endgame.
+- **r11 VectorGrid.Slicer was supposed to skip L.Polygon entirely**.
+  It does, but the CDN load (+300 ms preview) plus per-tile slicing
+  overhead makes it only ~1.3× faster than the baseline. The
+  instantiation-free advantage is real but smaller than expected.
+- **r10 polygon simplify was supposed to halve everything**. It
+  shaves file size and parse cost (33 %) but does not touch the
+  L.Polygon instantiation count, which is the dominant cost.
 
 ### What made the most difference (ranked)
 
@@ -428,9 +448,13 @@ r9 █████████                                    1317 ms  (prev
    subsequent version. The single biggest architectural win.
 2. **Preload hint (r2 → r3)** — nearly halved total time by overlapping
    network with JS init. Huge return on a one-line HTML change.
-3. **Gzip on the wire (r4 → r5)** — when you are shipping 28 MB of
-   text, 7× compression is almost free and immediately visible.
-4. **PNG preview for first-pixel (r9)** — the trick that makes the
+3. **Viewport-first load (r9++ initial chunk)** — MIT-area features
+   land in 331 ms regardless of how big the full set is.
+4. **Color-batched rendering (r12/r13)** — replacing 123 K L.Polygon
+   objects with a handful (one per color) cut total render time by
+   almost half. The click regression r12 introduced was resolved in
+   r13 with a ~40-line point-in-polygon handler.
+5. **PNG preview for first-pixel (r9)** — the trick that makes the
    page feel fast even when the vector layer takes 2 s.
 
 ## Remaining bottlenecks and further work
@@ -475,22 +499,32 @@ Even with r9, these are not small:
 ## Conclusion
 
 LightMap's client-side render went from **r0: fails to load** to
-**r9: ~350 ms preview + ~1.3 s full vector** at 100 % scale. The key
-insights:
+**r13: ~332 ms preview + ~1.8 s full interactive render with click**
+at 100 % scale. The key insights:
 
 1. **Fighting the browser is expensive.** r0 and r1 both tried to
    push 32 MB of inline data through HTML parse. Nothing downstream
    matters until that is gone.
 2. **Preload + gzip are almost free, and they compound.** r3 + r5
    together cut ~2300 ms off r2 for roughly 10 lines of code.
-3. **Custom renderers need to replicate the library's hidden work.**
+3. **The real bottleneck was Leaflet's per-feature overhead.** JSON
+   parse is fast; network is fast on a LAN; Leaflet instantiating
+   123 K `L.Polygon` objects is what actually costs 1.5–2 s. The
+   color-batched renderer (r12/r13) cuts this to ~4 objects.
+4. **You can have both speed and interactivity.** r12 is fastest but
+   loses per-feature click. r13 adds a ~40-line ray-cast PIP handler
+   with a pre-computed bbox index and recovers click at ~1 ms per
+   click — essentially free on top of r12's render cost.
+5. **Custom renderers need to replicate the library's hidden work.**
    r7 is a 97-second reminder that "how hard could it be?" is often
-   the wrong question.
-4. **Perceived performance is not total time.** r5 is faster than r9
+   the wrong question. r11 (VectorGrid) reinforces this: a proper
+   library still has overhead (CDN, tile slicing) that limits the
+   win.
+6. **Perceived performance is not total time.** r5 is faster than r9
    by the `total` metric but feels slower because r9 has a preview.
    Design the benchmark to measure what the user feels, not what
    the spec defines.
-5. **Hybrid strategies beat purity.** r8 is too static; r5 is too
+7. **Hybrid strategies beat purity.** r8 is too static; r5 is too
    slow; r9 is both at once. If you can combine two imperfect
    approaches, the sum can be better than either pure form.
 
