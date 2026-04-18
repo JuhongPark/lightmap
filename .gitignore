@@ -177,15 +177,13 @@ __marimo__/
 # Project data
 data/
 
-# Generated shadow and building sidecars
-docs/shadows.geojson
+# Generated shadow and building sidecars.
+# The raw *.geojson and *.png files ARE tracked so GitHub Pages can
+# serve them. The .gz files are dev-only (GitHub Pages applies its
+# own gzip on the fly) and stay gitignored.
 docs/shadows.geojson.gz
-docs/shadows_initial.geojson
 docs/shadows_initial.geojson.gz
-docs/shadows.png
-docs/buildings.geojson
 docs/buildings.geojson.gz
-docs/buildings_initial.geojson
 docs/buildings_initial.geojson.gz
 
 # Per-strategy HTML variants
