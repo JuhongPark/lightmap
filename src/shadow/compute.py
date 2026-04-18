@@ -98,7 +98,10 @@ def parse_building_features(features, height_field="BLDG_HGT_2010"):
 # Simplify tolerance in degrees. 5e-5 degrees is about 5.5 meters at this
 # latitude, well below any rendering pixel size at sensible map zoom levels.
 RENDER_SIMPLIFY_TOLERANCE = 5e-5
-# Coordinate decimal places for JSON serialization. 6 decimals is ~11 cm.
+# In-memory precision for shadow polygons. 6 decimals is ~11 cm.
+# Kept at 6 so downstream compute_shadow_coverage.unary_union sees
+# topologically-clean geometry. Wire-format rounding to fewer decimals
+# happens in render/strategies.py:_write_geojson at serialize time.
 RENDER_COORD_PRECISION = 6
 
 

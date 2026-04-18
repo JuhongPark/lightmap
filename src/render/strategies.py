@@ -103,9 +103,39 @@ def _simplify_features(features, tol_deg):
     return out
 
 
-def _write_geojson(path, features, *, gzip_sidecar=False, simplify_tol_deg=None):
+# Wire-format coordinate precision. 5 decimals is ~1.1 m at lat 42,
+# below one pixel at max map zoom. Applied only at serialize time so
+# in-memory shadows stay topologically clean for compute steps.
+WIRE_COORD_PRECISION = 5
+
+
+def _round_coords(obj, n):
+    """Recursively round GeoJSON coordinate arrays to n decimal places."""
+    if isinstance(obj, (list, tuple)):
+        if len(obj) == 2 and all(isinstance(v, (int, float)) for v in obj):
+            return [round(obj[0], n), round(obj[1], n)]
+        return [_round_coords(x, n) for x in obj]
+    return obj
+
+
+def _write_geojson(path, features, *, gzip_sidecar=False, simplify_tol_deg=None,
+                   coord_precision=WIRE_COORD_PRECISION):
     if simplify_tol_deg:
         features = _simplify_features(features, simplify_tol_deg)
+    if coord_precision is not None:
+        features = [
+            {
+                "type": "Feature",
+                "properties": f.get("properties") or {},
+                "geometry": {
+                    "type": f["geometry"]["type"],
+                    "coordinates": _round_coords(
+                        f["geometry"]["coordinates"], coord_precision
+                    ),
+                },
+            }
+            for f in features
+        ]
     with open(path, "w") as f:
         json.dump(
             {"type": "FeatureCollection", "features": features},
