@@ -159,6 +159,7 @@ Documentation is being added. This section will be updated as new documents are 
 - [Technology Research](docs/tech-research.md) -- Tech stack, decisions, and competitor analysis.
 - [Optimization Plan](docs/optimization-plan.md) -- Step-by-step day pipeline optimization from 102s to roughly 12s of compute.
 - [Render Optimization Plan](docs/render-optimization-plan.md) -- r0 through r9 browser-side render strategies, from inline SVG that never loads to PNG-then-vector hybrid with a 350 ms preview.
+- [Bench Protocol](docs/bench-protocol.md) -- Checklist and red flags for producing trustworthy bench numbers.
 - [Course Information](docs/course.md) -- MIT 1.001 course details and grading rubric.
 
 ## License
