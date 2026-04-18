@@ -36,6 +36,7 @@ from render.strategies import (
     DEFAULT_RENDER_STRATEGY,
     RENDER_STRATEGIES,
     SHADOW_CMAP_COLORS,
+    add_building_layer,
     add_shadow_layer,
 )
 
@@ -318,13 +319,14 @@ def _load_buildings_and_shadows(scale_pct, target_time):
         finally:
             conn.close()
 
-        # At 100% scale we skip the separate building layer entirely. Each
-        # shadow polygon is the ConvexHull of the building plus its
-        # translation, so it visually contains the building footprint. A
-        # separate building layer would double the rendered geometry for no
-        # visual benefit, and at 123K polygons that doubling costs ~50 MB
-        # in the output HTML.
-        building_data = {"type": "FeatureCollection", "features": []}
+        # Load building footprints from the SQLite db alongside the
+        # PostGIS-computed shadows. The async building layer renders
+        # these as a separate canvas layer (see strategies.py), so the
+        # user can actually click a building to see its height — the
+        # shadow alone is a ConvexHull and obscures the real footprint.
+        print("Loading buildings...")
+        building_data, _ = load_buildings_with_parsed(scale_pct)
+        print(f"  Total buildings: {len(building_data['features'])}")
 
         print("Computing shadow coverage...")
         coverage = compute_shadow_coverage_raster(shadow_polys, resolution_m=10.0)
@@ -340,16 +342,6 @@ def _load_buildings_and_shadows(scale_pct, target_time):
         print("ERROR: No buildings loaded.")
         return None, [], 0.0
 
-    # Skip the building layer when there are enough shadows to cover every
-    # building visually. Each shadow is ConvexHull of building+translated, so
-    # it already contains the building footprint. Drawing a second layer on
-    # top is redundant above ~10K features and doubles the rendered HTML.
-    if building_count > 10000:
-        print("  Building layer skipped for rendering (shadows cover it)")
-        render_building_data = {"type": "FeatureCollection", "features": []}
-    else:
-        render_building_data = building_data
-
     print("Computing shadows...")
     shadows, _, _ = compute_all_shadows(parsed, target_time)
     print(f"  Shadows computed: {len(shadows)}")
@@ -358,7 +350,7 @@ def _load_buildings_and_shadows(scale_pct, target_time):
     coverage = compute_shadow_coverage(shadows)
     print(f"  Shadow coverage: {coverage:.1f}%")
 
-    return render_building_data, shadows, coverage
+    return building_data, shadows, coverage
 
 
 # ---------------------------------------------------------------------------
@@ -538,13 +530,17 @@ def build_day_map(target_time, altitude, azimuth, scale_pct,
 
     cfg = RENDER_STRATEGIES.get(render_strategy, RENDER_STRATEGIES[DEFAULT_RENDER_STRATEGY])
 
-    # building_count falls back to shadow count when the building layer was
-    # dropped for size reasons at 100% scale. Each shadow corresponds to one
-    # building anyway.
-    building_count = len(building_data["features"]) or len(shadows)
+    building_count = len(building_data["features"])
     m = _create_base_map("CartoDB positron", prefer_canvas=cfg["prefer_canvas"])
 
-    _add_building_layer(m, building_data)
+    # Route the building layer through the render strategy module so
+    # async strategies can ship a sidecar instead of inlining 123 K
+    # polygons. Inline strategies (r0/r1) fall back to folium's
+    # embedded GeoJson via _add_building_layer.
+    if cfg["shadow_mode"] == "inline":
+        _add_building_layer(m, building_data)
+    else:
+        add_building_layer(m, building_data, out_dir=OUT_DIR)
     cmap = _make_shadow_cmap()
     add_shadow_layer(m, shadows, cmap, strategy=render_strategy, out_dir=OUT_DIR)
     _add_ui_plugins(m, theme="light")

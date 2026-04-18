@@ -143,6 +143,92 @@ RENDER_STRATEGIES = {
 DEFAULT_RENDER_STRATEGY = "r9-png-then-vector"
 
 
+def add_building_layer(m, building_data, *, out_dir):
+    """Write building footprints as an async sidecar and render on canvas.
+
+    At scale=100 the building set (~123 K polygons) is too large to inline
+    into the HTML, and Leaflet's SVG renderer chokes on that many DOM
+    nodes. We write the features to `docs/buildings.geojson` (compact
+    JSON + gzip sidecar), preload the .geojson during HTML parse, and
+    fetch+render on canvas so every building is visible and clickable —
+    the popup shows height in feet.
+
+    Buildings are rendered under the shadow layer (L.geoJSON `pane` +
+    explicit `zIndex`) so they stay visible through the semi-transparent
+    shadow canvas.
+    """
+    features = (building_data or {}).get("features") or []
+    if not features:
+        return
+
+    sidecar_name = "buildings.geojson"
+    sidecar_path = os.path.join(out_dir, sidecar_name)
+    with open(sidecar_path, "w") as f:
+        json.dump(
+            {"type": "FeatureCollection", "features": features},
+            f,
+            separators=(",", ":"),
+        )
+    gz_path = sidecar_path + ".gz"
+    with open(sidecar_path, "rb") as src, _gzip.open(gz_path, "wb", 6) as dst:
+        dst.writelines(src)
+
+    # Preload during HTML parse so the fetch overlaps with Leaflet init.
+    preload_hint = (
+        f'<link rel="preload" href="{sidecar_name}" as="fetch" '
+        f'type="application/geo+json" crossorigin="anonymous" '
+        f'fetchpriority="low">'
+    )
+    m.get_root().header.add_child(folium.Element(preload_hint))
+
+    map_var = m.get_name()
+    script = f"""
+<script>
+(function() {{
+  function addBuildings() {{
+    if (typeof {map_var} === 'undefined') {{
+      setTimeout(addBuildings, 50);
+      return;
+    }}
+    // Dedicated pane below the shadow layer so buildings stay visible
+    // behind the semi-transparent shadow canvas.
+    if (!{map_var}.getPane('buildings')) {{
+      var pane = {map_var}.createPane('buildings');
+      pane.style.zIndex = 390;
+    }}
+    fetch('{sidecar_name}')
+      .then(function(r) {{ return r.json(); }})
+      .then(function(data) {{
+        L.geoJSON(data, {{
+          pane: 'buildings',
+          style: {{
+            color: '#475569',
+            weight: 0.5,
+            fillColor: '#94a3b8',
+            fillOpacity: 0.35,
+          }},
+          onEachFeature: function(feat, layer) {{
+            var h = feat.properties && feat.properties.BLDG_HGT_2010;
+            var html = '<div style="font-size:12px;">'
+              + '<b>Building</b><br>'
+              + 'Height: ' + (h != null ? h + ' ft' : 'unknown')
+              + '</div>';
+            layer.bindPopup(html);
+          }},
+        }}).addTo({map_var});
+        window.__lightmap_buildings_ready = performance.now();
+      }})
+      .catch(function(err) {{
+        console.error('failed to load buildings:', err);
+      }});
+  }}
+  addBuildings();
+}})();
+</script>
+"""
+    m.get_root().html.add_child(folium.Element(script))
+
+
 def shadow_color_stops_for_js(cmap):
     """Convert a branca LinearColormap into a plain JS-usable stop table.
 
@@ -218,11 +304,14 @@ def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg, out_dir):
                 polys.append(_shape(geom))
             except Exception:
                 continue
-    # For r9 we want the PNG to be a lightweight preview that loads
-    # within the first ~100 ms, not the production raster. Drop to a
-    # 20 m grid; file drops from ~1.6 MB to ~60-150 KB while the visual
-    # is still recognizable at zoom 13-14 where the user lands.
-    _W, _H, bounds = render_shadows_png(polys, png_path, resolution_m=20.0)
+    # Preview PNG: 10 m grid at higher opacity. At 20 m the shadows
+    # visually blend into the light CARTO basemap at typical zoom (13-15)
+    # and the user reported "preview invisible". 10 m stays lightweight
+    # (~200 KB) but is crisp enough to register, and alpha=180/255 (~70 %)
+    # makes it clearly visible against the basemap.
+    _W, _H, bounds = render_shadows_png(
+        polys, png_path, resolution_m=10.0, alpha=180,
+    )
     bounds_js = json.dumps(bounds)
 
     sidecar_name = "shadows.geojson"
@@ -275,6 +364,16 @@ def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg, out_dir):
     var c = colorFor(h);
     return {{ fillColor: c, color: c, weight: 0.3, fillOpacity: 0.45 }};
   }}
+  function bindShadowPopup(feature, layer) {{
+    var p = feature.properties || {{}};
+    var h = p.height_ft;
+    var s = p.shadow_len_ft;
+    var html = '<div style="font-size:12px;">';
+    if (h != null) html += '<b>Building Height:</b> ' + h + ' ft<br>';
+    if (s != null) html += '<b>Shadow Length:</b> ' + s + ' ft';
+    html += '</div>';
+    layer.bindPopup(html);
+  }}
   window.__lightmap = {{
     fetchStart: null,
     fetchEnd: null,
@@ -306,7 +405,10 @@ def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg, out_dir):
       .then(function(data) {{
         mark('fetchEnd');
         window.__lightmap.featureCount = (data && data.features) ? data.features.length : 0;
-        var layer = L.geoJSON(data, {{ style: styleFn }}).addTo({map_var});
+        var layer = L.geoJSON(data, {{
+          style: styleFn,
+          onEachFeature: bindShadowPopup,
+        }}).addTo({map_var});
         var cvs = layer._renderer && layer._renderer._container;
         if (cvs) {{
           cvs.style.transition = 'opacity 300ms ease-out';
@@ -525,7 +627,10 @@ def _add_shadow_layer_async(m, shadows, cmap, *, preload=False,
     # shadows materialize progressively instead of all at once at the
     # end. __lightmap.addedAt fires on the last chunk.
     chunked_js = f"""
-        var layer = L.geoJSON(null, {{ style: styleFn }}).addTo({map_var});
+        var layer = L.geoJSON(null, {{
+          style: styleFn,
+          onEachFeature: bindShadowPopup,
+        }}).addTo({map_var});
         var feats = data.features || [];
         var chunkSize = 4000;
         var i = 0;
@@ -553,7 +658,10 @@ def _add_shadow_layer_async(m, shadows, cmap, *, preload=False,
 
     # Default: single L.geoJSON call with optional fade-in.
     default_add_js = f"""
-        var layer = L.geoJSON(data, {{ style: styleFn }}).addTo({map_var});{fade_in_js}
+        var layer = L.geoJSON(data, {{
+          style: styleFn,
+          onEachFeature: bindShadowPopup,
+        }}).addTo({map_var});{fade_in_js}
         window.__lightmap.status = 'done';
         mark('addedAt');
     """
@@ -665,6 +773,16 @@ def _add_shadow_layer_async(m, shadows, cmap, *, preload=False,
     return {{
       fillColor: c, color: c, weight: 0.3, fillOpacity: 0.45
     }};
+  }}
+  function bindShadowPopup(feature, layer) {{
+    var p = feature.properties || {{}};
+    var h = p.height_ft;
+    var s = p.shadow_len_ft;
+    var html = '<div style="font-size:12px;">';
+    if (h != null) html += '<b>Building Height:</b> ' + h + ' ft<br>';
+    if (s != null) html += '<b>Shadow Length:</b> ' + s + ' ft';
+    html += '</div>';
+    layer.bindPopup(html);
   }}
   // Expose render milestones for headless verification. A separate test
   // harness can poll these flags or wait on the custom events emitted

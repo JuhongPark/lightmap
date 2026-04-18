@@ -177,10 +177,12 @@ __marimo__/
 # Project data
 data/
 
-# Generated shadow sidecar
+# Generated shadow and building sidecars
 docs/shadows.geojson
 docs/shadows.geojson.gz
 docs/shadows.png
+docs/buildings.geojson
+docs/buildings.geojson.gz
 
 # Per-strategy HTML variants
 docs/prototype_r*.html
