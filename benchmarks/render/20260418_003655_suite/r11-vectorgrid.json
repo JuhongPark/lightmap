@@ -1,0 +1,81 @@
+{
+  "label": "r11-vectorgrid",
+  "url": "http://localhost:8765/prototype_r11-vectorgrid.html",
+  "timestamp": "2026-04-18T04:37:59.811307+00:00",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "timings": {
+    "navigation": {
+      "responseEnd": 3.2999999821186066,
+      "domContentLoaded": 408.19999998807907,
+      "load": 647.5999999940395,
+      "duration": 647.5999999940395
+    },
+    "paint": {
+      "fcp": 424,
+      "lcp": 732,
+      "lcp_element": "IMG",
+      "lcp_size": 65536,
+      "lcp_src": "https://a.basemaps.cartocdn.com/light_all/16/19825/24239.png",
+      "lcp_class": "leaflet-tile leaflet-tile-loaded",
+      "lcp_kind": "tile"
+    }
+  },
+  "lightmap": {
+    "fetchStart": 630.2999999821186,
+    "fetchEnd": 2367.199999988079,
+    "previewAt": 647.3999999761581,
+    "initialAt": 717.5999999940395,
+    "addedAt": 2621.399999976158,
+    "featureCount": 123105,
+    "initialFeatureCount": 14852,
+    "status": "done"
+  },
+  "console": [],
+  "errors": [],
+  "requests_failed": [],
+  "dom_summary": {
+    "canvas_count": 1,
+    "canvas_sizes": [
+      {
+        "w": 1536,
+        "h": 960
+      }
+    ],
+    "leaflet_panes": [
+      "leaflet-pane leaflet-map-pane",
+      "leaflet-pane leaflet-tile-pane",
+      "leaflet-pane leaflet-overlay-pane",
+      "leaflet-pane leaflet-shadow-pane",
+      "leaflet-pane leaflet-marker-pane",
+      "leaflet-pane leaflet-tooltip-pane",
+      "leaflet-pane leaflet-popup-pane",
+      "leaflet-pane leaflet-buildings-pane",
+      "leaflet-pane leaflet-map-pane",
+      "leaflet-pane leaflet-tile-pane",
+      "leaflet-pane leaflet-overlay-pane",
+      "leaflet-pane leaflet-shadow-pane",
+      "leaflet-pane leaflet-marker-pane",
+      "leaflet-pane leaflet-tooltip-pane",
+      "leaflet-pane leaflet-popup-pane"
+    ],
+    "body_html_len": 98775,
+    "tile_layers": 25,
+    "svg_paths": 6,
+    "overlay_canvas": {
+      "found": 0
+    },
+    "overlay_images": []
+  },
+  "screenshots": {
+    "pre_shadows": "benchmarks/render/20260418_003759_suite_r11-vectorgrid/pre_shadows.png",
+    "post_shadows": "benchmarks/render/20260418_003759_suite_r11-vectorgrid/post_shadows.png",
+    "full_page": "benchmarks/render/20260418_003759_suite_r11-vectorgrid/full_page.png"
+  },
+  "ok": true,
+  "strategy": "r11-vectorgrid",
+  "run_idx": 0,
+  "fatal_error": null
+}
