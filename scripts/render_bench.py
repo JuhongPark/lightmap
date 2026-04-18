@@ -43,6 +43,72 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
 from render_verify import run as verify_run, RenderResult  # noqa: E402
 
 
+_DOCS_DIR = os.path.join(REPO_ROOT, "docs")
+_SIDECAR_JSON = os.path.join(_DOCS_DIR, "shadows.geojson")
+_SIDECAR_GZ = os.path.join(_DOCS_DIR, "shadows.geojson.gz")
+# Ratio of expected feature count to scale percent. At scale=100 we see
+# ~123K features; scale=1 gives ~1230. Used to flag sidecar/scale mismatch.
+_FEATURES_PER_PCT = 1230
+
+
+def _sidecar_feature_count() -> int | None:
+    """Count features in docs/shadows.geojson without loading the full JSON.
+
+    Returns None if the file is missing. This is a cheap approximation
+    (linear scan) that avoids parsing a 28 MB JSON just to sanity-check.
+    """
+    if not os.path.isfile(_SIDECAR_JSON):
+        return None
+    try:
+        with open(_SIDECAR_JSON, "rb") as f:
+            # `"type":"Feature"` appears once per feature in our compact
+            # output. Good enough for a mismatch warning.
+            return f.read().count(b'"type":"Feature"')
+    except OSError:
+        return None
+
+
+def _sidecar_sanity_check(strategy: str, scale: int) -> None:
+    """Warn loudly if the post-regen sidecar does not match the scale.
+
+    Silent when the strategy doesn't use the sidecar (inline, png-overlay).
+    """
+    from prototype import RENDER_STRATEGIES  # lazy to avoid import-time cost
+    cfg = RENDER_STRATEGIES.get(strategy) or {}
+    mode = cfg.get("shadow_mode")
+    if mode in ("inline", "png-overlay"):
+        return  # no sidecar involved
+
+    actual = _sidecar_feature_count()
+    if actual is None:
+        print(f"[bench] WARNING: {strategy} expected a sidecar but "
+              f"{_SIDECAR_JSON} is missing")
+        return
+    expected = scale * _FEATURES_PER_PCT
+    lo, hi = int(expected * 0.5), int(expected * 2.0)
+    if not (lo <= actual <= hi):
+        print(f"[bench] WARNING: sidecar featureCount={actual} for "
+              f"{strategy} at scale={scale} (expected ~{expected}). "
+              f"Stale cache or wrong scale? Investigate before trusting "
+              f"these numbers.")
+    else:
+        print(f"[bench] sidecar ok: featureCount={actual} for {strategy} "
+              f"at scale={scale}")
+
+    # Also catch the stale-.gz case (plain is fresh, gz is older). The
+    # server now handles this correctly, but flag it so the user can fix
+    # the root cause (e.g. delete stale .gz) instead of relying on the
+    # server's mtime fallback forever.
+    if cfg.get("gzip_sidecar") and os.path.isfile(_SIDECAR_GZ):
+        try:
+            if os.path.getmtime(_SIDECAR_GZ) < os.path.getmtime(_SIDECAR_JSON):
+                print(f"[bench] WARNING: {_SIDECAR_GZ} is older than "
+                      f"the plain sidecar. Server will fall back to "
+                      f"plain; delete the .gz if it is stale.")
+        except OSError:
+            pass
+
+
 def regen(strategy: str, scale: int) -> str:
     """Invoke prototype.py to emit the strategy-specific HTML file.
 
@@ -58,6 +124,7 @@ def regen(strategy: str, scale: int) -> str:
         "--out", out_filename,
     ]
     subprocess.run(cmd, check=True, cwd=REPO_ROOT)
+    _sidecar_sanity_check(strategy, scale)
     return out_filename
 
 
