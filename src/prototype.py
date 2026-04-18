@@ -370,10 +370,15 @@ def _create_base_map(tiles="CartoDB positron", *, prefer_canvas=True):
         location=MAP_CENTER, zoom_start=16, tiles=tiles,
         width="100%", height="100%",
         prefer_canvas=prefer_canvas,
-        min_zoom=15, max_zoom=18,
-        # Constrain pan + zoom-out to MIT + Financial District + Fenway.
-        min_lat=42.340, max_lat=42.370,
-        min_lon=-71.110, max_lon=-71.045,
+        # min_zoom pinned to zoom_start so the user cannot zoom out past
+        # the initial view. At zoom < 16 the visible viewport grows and
+        # Leaflet has to redraw far more polygons, which chokes on the
+        # 123 K feature set. User can still zoom in to 18 for detail.
+        min_zoom=16, max_zoom=18,
+        # Pan-able area. North to Harvard/Somerville, west past Watertown,
+        # east to Logan Airport, south into South Boston/Dorchester.
+        min_lat=42.310, max_lat=42.395,
+        min_lon=-71.225, max_lon=-70.995,
         max_bounds=True,
     )
     m.get_root().html.add_child(folium.Element(
