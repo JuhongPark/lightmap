@@ -35,13 +35,13 @@ from shadow.compute import render_shadows_png
 
 SHADOW_CMAP_COLORS = ["#cbd5e1", "#64748b", "#334155", "#0f172a"]
 
-# Initial viewport: MIT campus + a little surrounding area. Features
-# inside this box are pre-filtered into a small sidecar so the first
-# paint shows shadows + buildings within a few hundred ms; the full
-# set (123 K features) is still preloaded but at low priority and
-# swapped in once it arrives.
+# Maximum-zoom-out viewport: MIT + Boston Financial District + Fenway,
+# which also defines the pannable area enforced by the map's maxBounds.
+# Features inside this box are pre-filtered into a small sidecar so the
+# first paint shows interactive shadows + buildings across every area
+# the user can see, without waiting for the full 123 K-feature sidecar.
 # (south, west, north, east)
-INITIAL_BBOX = (42.355, -71.100, 42.365, -71.086)
+INITIAL_BBOX = (42.340, -71.110, 42.370, -71.045)
 
 
 def _feature_bbox(feature):
@@ -75,7 +75,37 @@ def _filter_features_by_bbox(features, bbox):
     return out
 
 
-def _write_geojson(path, features, *, gzip_sidecar=False):
+def _simplify_features(features, tol_deg):
+    """Simplify each feature's polygon to reduce vertex count.
+
+    tol_deg is in WGS84 degrees. 0.00003 ≈ 3 m at Boston latitude.
+    Polygons that go empty after simplification are dropped.
+    """
+    from shapely.geometry import shape as _shape, mapping as _mapping
+    out = []
+    for f in features:
+        geom = f.get("geometry") or {}
+        if geom.get("type") not in ("Polygon", "MultiPolygon"):
+            out.append(f)
+            continue
+        try:
+            g = _shape(geom).simplify(tol_deg, preserve_topology=True)
+        except Exception:
+            out.append(f)
+            continue
+        if g.is_empty:
+            continue
+        out.append({
+            "type": "Feature",
+            "properties": f.get("properties") or {},
+            "geometry": _mapping(g),
+        })
+    return out
+
+
+def _write_geojson(path, features, *, gzip_sidecar=False, simplify_tol_deg=None):
+    if simplify_tol_deg:
+        features = _simplify_features(features, simplify_tol_deg)
     with open(path, "w") as f:
         json.dump(
             {"type": "FeatureCollection", "features": features},
@@ -84,6 +114,7 @@ def _write_geojson(path, features, *, gzip_sidecar=False):
     if gzip_sidecar:
         with open(path, "rb") as src, _gzip.open(path + ".gz", "wb", 6) as dst:
             dst.writelines(src)
+    return len(features)
 
 
 RENDER_STRATEGIES = {
@@ -189,19 +220,71 @@ RENDER_STRATEGIES = {
         "expected_total_ms": 1940,
         "expected_preview_ms": 350,
     },
+    "r10-simplify": {
+        "label": "r9 + 3 m polygon simplification (smaller file + faster parse)",
+        "prefer_canvas": True,
+        "shadow_mode": "png-then-vector",
+        "preload": True,
+        "fade_in": True,
+        "gzip_sidecar": True,
+        "simplify_tol_deg": 0.00003,
+        "expected_total_ms": 2500,
+        "expected_preview_ms": 350,
+    },
+    "r11-vectorgrid": {
+        "label": "r9 + L.vectorGrid.slicer (no per-feature L.Polygon)",
+        "prefer_canvas": True,
+        "shadow_mode": "png-then-vector",
+        "preload": True,
+        "fade_in": True,
+        "gzip_sidecar": True,
+        "render_mode": "vectorgrid",
+        "expected_total_ms": 1500,
+        "expected_preview_ms": 350,
+    },
+    "r12-colorbatch": {
+        "label": "r9 + group features by color (one L.Polygon per color, no click)",
+        "prefer_canvas": True,
+        "shadow_mode": "png-then-vector",
+        "preload": True,
+        "fade_in": True,
+        "gzip_sidecar": True,
+        "render_mode": "colorbatch",
+        "expected_total_ms": 1000,
+        "expected_preview_ms": 350,
+    },
+    "r13-hybrid": {
+        "label": "r12 render + point-in-polygon click handler (fast AND clickable)",
+        "prefer_canvas": True,
+        "shadow_mode": "png-then-vector",
+        "preload": True,
+        "fade_in": True,
+        "gzip_sidecar": True,
+        "render_mode": "colorbatch",
+        "pip_click": True,
+        "expected_total_ms": 1200,
+        "expected_preview_ms": 350,
+    },
 }
-DEFAULT_RENDER_STRATEGY = "r9-png-then-vector"
+DEFAULT_RENDER_STRATEGY = "r13-hybrid"
 
 
-def add_building_layer(m, building_data, *, out_dir):
+def add_building_layer(m, building_data, *, out_dir, cfg=None):
     """Write building footprints as an async sidecar and render on canvas.
 
     Two-stage load: a small `buildings_initial.geojson` contains only
-    the features intersecting INITIAL_BBOX (~MIT campus). It is fetched
-    with high priority and drawn within a few hundred ms. The full
-    `buildings.geojson` preloads at low priority and replaces the
-    initial layer once it arrives.
+    the features intersecting INITIAL_BBOX. It is fetched with high
+    priority and drawn within a few hundred ms. The full
+    `buildings.geojson` replaces the initial layer once it arrives.
+
+    When cfg.pip_click is True, buildings are rendered as a single
+    L.polygon (much faster than 123 K L.Polygon objects) and their
+    features are registered into `window._bdg_feats` so the shadow
+    strategy's map click handler can fall through to them when a click
+    misses a shadow.
     """
+    cfg = cfg or {}
+    pip_click = bool(cfg.get("pip_click"))
     features = (building_data or {}).get("features") or []
     if not features:
         return
@@ -227,28 +310,81 @@ def add_building_layer(m, building_data, *, out_dir):
     m.get_root().header.add_child(folium.Element(preload_hint))
 
     map_var = m.get_name()
-    script = f"""
-<script>
-(function() {{
-  var buildingStyle = {{
-    color: '#475569', weight: 0.5,
-    fillColor: '#94a3b8', fillOpacity: 0.35,
-  }};
-  function bindBuildingPopup(feat, layer) {{
+    if pip_click:
+        # Colorbatch rendering: one L.polygon covers all buildings.
+        # Click goes through the shadow strategy's shared map handler,
+        # which falls through to window._bdg_feats when no shadow hits.
+        mk_building_js = f"""
+  function mkBuildingLayer(data) {{
+    var feats = (data && data.features) || [];
+    var latlngs = [];
+    for (var i = 0; i < feats.length; i++) {{
+      var coords = feats[i].geometry && feats[i].geometry.coordinates && feats[i].geometry.coordinates[0];
+      if (!coords) continue;
+      var ring = [];
+      for (var j = 0; j < coords.length; j++) {{
+        ring.push([coords[j][1], coords[j][0]]);
+      }}
+      latlngs.push(ring);
+    }}
+    return L.polygon(latlngs, {{
+      pane: 'buildings',
+      color: '#475569', weight: 0.5,
+      fillColor: '#94a3b8', fillOpacity: 0.35,
+    }});
+  }}
+  function _bComputeBbox(ring) {{
+    var minx = ring[0][0], maxx = minx, miny = ring[0][1], maxy = miny;
+    for (var i = 1; i < ring.length; i++) {{
+      var x = ring[i][0], y = ring[i][1];
+      if (x < minx) minx = x; else if (x > maxx) maxx = x;
+      if (y < miny) miny = y; else if (y > maxy) maxy = y;
+    }}
+    return [minx, miny, maxx, maxy];
+  }}
+  function _indexBuildings(features) {{
+    var out = [];
+    for (var i = 0; i < features.length; i++) {{
+      var f = features[i];
+      var ring = f.geometry && f.geometry.coordinates && f.geometry.coordinates[0];
+      if (!ring || ring.length < 3) continue;
+      out.push({{ ring: ring, bbox: _bComputeBbox(ring), props: f.properties || {{}} }});
+    }}
+    return out;
+  }}
+"""
+    else:
+        mk_building_js = """
+  function bindBuildingPopup(feat, layer) {
     var h = feat.properties && feat.properties.BLDG_HGT_2010;
     var html = '<div style="font-size:12px;">'
       + '<b>Building</b><br>'
       + 'Height: ' + (h != null ? h + ' ft' : 'unknown')
       + '</div>';
     layer.bindPopup(html);
-  }}
-  function mkBuildingLayer(data) {{
-    return L.geoJSON(data, {{
+  }
+  function mkBuildingLayer(data) {
+    return L.geoJSON(data, {
       pane: 'buildings',
-      style: buildingStyle,
+      style: {
+        color: '#475569', weight: 0.5,
+        fillColor: '#94a3b8', fillOpacity: 0.35,
+      },
       onEachFeature: bindBuildingPopup,
-    }});
-  }}
+    });
+  }
+"""
+
+    pip_register_initial = (
+        "window._bdg_feats = _indexBuildings(data.features || []);"
+        if pip_click else ""
+    )
+    pip_register_full = pip_register_initial
+
+    script = f"""
+<script>
+(function() {{
+{mk_building_js}
   function addBuildings() {{
     if (typeof {map_var} === 'undefined') {{
       setTimeout(addBuildings, 50);
@@ -264,9 +400,8 @@ def add_building_layer(m, building_data, *, out_dir):
       .then(function(r) {{ return r.json(); }})
       .then(function(data) {{
         initialLayer = mkBuildingLayer(data).addTo({map_var});
+        {pip_register_initial}
         window.__lightmap_buildings_initial_at = performance.now();
-        // Defer the full fetch so the initial layer paints before the
-        // 4 MB full set downloads+parses and blocks the main thread.
         setTimeout(fetchFull, 0);
       }})
       .catch(function(err) {{
@@ -281,6 +416,7 @@ def add_building_layer(m, building_data, *, out_dir):
         .then(function(data) {{
           var full = mkBuildingLayer(data).addTo({map_var});
           if (initialLayer) {{ {map_var}.removeLayer(initialLayer); }}
+          {pip_register_full}
           window.__lightmap_buildings_ready = performance.now();
         }})
         .catch(function(err) {{
@@ -380,11 +516,15 @@ def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg, out_dir):
     )
     bounds_js = json.dumps(bounds)
 
+    simplify_tol = cfg.get("simplify_tol_deg")
+
     # Full sidecar (all 123 K shadows at scale=100).
     sidecar_name = "shadows.geojson"
     sidecar_path = os.path.join(out_dir, sidecar_name)
     _write_geojson(
-        sidecar_path, shadows, gzip_sidecar=bool(cfg.get("gzip_sidecar")),
+        sidecar_path, shadows,
+        gzip_sidecar=bool(cfg.get("gzip_sidecar")),
+        simplify_tol_deg=simplify_tol,
     )
 
     # Initial chunk: only features intersecting INITIAL_BBOX (~MIT campus).
@@ -397,6 +537,7 @@ def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg, out_dir):
     _write_geojson(
         initial_path, initial_features,
         gzip_sidecar=bool(cfg.get("gzip_sidecar")),
+        simplify_tol_deg=simplify_tol,
     )
 
     # Preload hints: only the PNG + the initial chunk are preloaded.
@@ -415,9 +556,95 @@ def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg, out_dir):
     for h in hints:
         m.get_root().header.add_child(folium.Element(h))
 
+    # Some render_mode variants need external scripts from CDN. These
+    # must load *after* Leaflet itself, which folium puts in <body>'s
+    # JS block, so we append to the body rather than <head>.
+    render_mode = cfg.get("render_mode", "geojson")
+    if render_mode == "vectorgrid":
+        m.get_root().html.add_child(folium.Element(
+            '<script src="https://unpkg.com/leaflet.vectorgrid@1.3.0/'
+            'dist/Leaflet.VectorGrid.bundled.min.js"></script>'
+        ))
+
     stops = shadow_color_stops_for_js(cmap)
     stops_js = json.dumps(stops)
     map_var = m.get_name()
+
+    if render_mode == "vectorgrid":
+        # L.vectorGrid.slicer renders straight to canvas tiles without
+        # creating a per-feature L.Polygon. At 123 K features this is
+        # the single biggest instantiation-time win available without
+        # switching off Leaflet.
+        mk_shadow_js = f"""
+  function mkShadowLayer(data) {{
+    var layer = L.vectorGrid.slicer(data, {{
+      vectorTileLayerStyles: {{
+        sliced: function(properties, zoom) {{
+          var h = (properties && properties.height_ft) || 0;
+          var c = colorFor(h);
+          return {{
+            fillColor: c, color: c, weight: 0.3,
+            fillOpacity: 0.45, fill: true,
+          }};
+        }},
+      }},
+      interactive: true,
+      maxNativeZoom: 18,
+    }});
+    layer.on('click', function(e) {{
+      var p = e.layer && e.layer.properties;
+      if (!p) return;
+      var h = p.height_ft;
+      var s = p.shadow_len_ft;
+      var html = '<div style="font-size:12px;">';
+      if (h != null) html += '<b>Building Height:</b> ' + h + ' ft<br>';
+      if (s != null) html += '<b>Shadow Length:</b> ' + s + ' ft';
+      html += '</div>';
+      L.popup().setLatLng(e.latlng).setContent(html).openOn({map_var});
+    }});
+    return layer;
+  }}
+"""
+    elif render_mode == "colorbatch":
+        # Group features by fill color. One L.polygon per color means
+        # only a handful of Leaflet objects instead of 123 K. Trade-off:
+        # click does not surface per-feature info; the whole color group
+        # acts as one clickable layer.
+        mk_shadow_js = f"""
+  function mkShadowLayer(data) {{
+    var byColor = {{}};
+    var feats = (data && data.features) || [];
+    for (var i = 0; i < feats.length; i++) {{
+      var f = feats[i];
+      var h = (f.properties && f.properties.height_ft) || 0;
+      var c = colorFor(h);
+      if (!byColor[c]) byColor[c] = [];
+      var coords = f.geometry && f.geometry.coordinates && f.geometry.coordinates[0];
+      if (!coords) continue;
+      var latlngs = [];
+      for (var j = 0; j < coords.length; j++) {{
+        latlngs.push([coords[j][1], coords[j][0]]);
+      }}
+      byColor[c].push(latlngs);
+    }}
+    var grp = L.layerGroup();
+    Object.keys(byColor).forEach(function(c) {{
+      L.polygon(byColor[c], {{
+        fillColor: c, color: c, weight: 0.3, fillOpacity: 0.45,
+      }}).addTo(grp);
+    }});
+    return grp;
+  }}
+"""
+    else:  # geojson (default / r9, r10)
+        mk_shadow_js = """
+  function mkShadowLayer(data) {
+    return L.geoJSON(data, {
+      style: styleFn,
+      onEachFeature: bindShadowPopup,
+    });
+  }
+"""
 
     script = f"""
 <script>
@@ -455,15 +682,89 @@ def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg, out_dir):
     status: 'pending',
   }};
   function mark(name) {{ window.__lightmap[name] = performance.now(); }}
-  function mkShadowLayer(data) {{
-    return L.geoJSON(data, {{
-      style: styleFn,
-      onEachFeature: bindShadowPopup,
+{mk_shadow_js}
+
+  // Point-in-polygon click handler. Active only for render modes that
+  // do not bind per-feature popups via L.geoJSON (colorbatch / vectorgrid).
+  // We keep the current feature set in window._sh_feats (with bbox pre-
+  // indexes) and do bbox-filter + ray-cast PIP on click. 123K features
+  // × ~10 ns bbox check = ~1.2 ms before PIP.
+  var _pipEnabled = {str(bool(cfg.get("pip_click"))).lower()};
+  var _pipInstalled = false;
+  function _computeBbox(ring) {{
+    var minx = ring[0][0], maxx = minx, miny = ring[0][1], maxy = miny;
+    for (var i = 1; i < ring.length; i++) {{
+      var x = ring[i][0], y = ring[i][1];
+      if (x < minx) minx = x; else if (x > maxx) maxx = x;
+      if (y < miny) miny = y; else if (y > maxy) maxy = y;
+    }}
+    return [minx, miny, maxx, maxy];
+  }}
+  function _pointInRing(x, y, ring) {{
+    var inside = false;
+    for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {{
+      var xi = ring[i][0], yi = ring[i][1];
+      var xj = ring[j][0], yj = ring[j][1];
+      if (((yi > y) !== (yj > y))
+          && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {{
+        inside = !inside;
+      }}
+    }}
+    return inside;
+  }}
+  function _indexFeatures(features) {{
+    var out = [];
+    for (var i = 0; i < features.length; i++) {{
+      var f = features[i];
+      var ring = f.geometry && f.geometry.coordinates && f.geometry.coordinates[0];
+      if (!ring || ring.length < 3) continue;
+      out.push({{ ring: ring, bbox: _computeBbox(ring), props: f.properties || {{}} }});
+    }}
+    return out;
+  }}
+  function _installPipClick() {{
+    if (_pipInstalled) return;
+    _pipInstalled = true;
+    {map_var}.on('click', function(e) {{
+      var lng = e.latlng.lng, lat = e.latlng.lat;
+      var feats = window._sh_feats || [];
+      for (var i = feats.length - 1; i >= 0; i--) {{
+        var f = feats[i], b = f.bbox;
+        if (lng < b[0] || lng > b[2] || lat < b[1] || lat > b[3]) continue;
+        if (_pointInRing(lng, lat, f.ring)) {{
+          var p = f.props, h = p.height_ft, s = p.shadow_len_ft;
+          var html = '<div style="font-size:12px;">';
+          if (h != null) html += '<b>Building Height:</b> ' + h + ' ft<br>';
+          if (s != null) html += '<b>Shadow Length:</b> ' + s + ' ft';
+          html += '</div>';
+          L.popup().setLatLng(e.latlng).setContent(html).openOn({map_var});
+          return;
+        }}
+      }}
+      // No shadow match at this point — fall through to buildings if
+      // the building layer has registered its own PIP index.
+      var bFeats = window._bdg_feats || [];
+      for (var i = bFeats.length - 1; i >= 0; i--) {{
+        var f = bFeats[i], b = f.bbox;
+        if (lng < b[0] || lng > b[2] || lat < b[1] || lat > b[3]) continue;
+        if (_pointInRing(lng, lat, f.ring)) {{
+          var h = f.props.BLDG_HGT_2010;
+          var html = '<div style="font-size:12px;"><b>Building</b><br>'
+            + 'Height: ' + (h != null ? h + ' ft' : 'unknown') + '</div>';
+          L.popup().setLatLng(e.latlng).setContent(html).openOn({map_var});
+          return;
+        }}
+      }}
     }});
   }}
 
   function addPreviewAndVector() {{
     if (typeof {map_var} === 'undefined') {{
+      setTimeout(addPreviewAndVector, 50);
+      return;
+    }}
+    if ('{render_mode}' === 'vectorgrid' && (typeof L === 'undefined' || !L.vectorGrid)) {{
+      // VectorGrid CDN script hasn't finished loading yet. Retry in 50 ms.
       setTimeout(addPreviewAndVector, 50);
       return;
     }}
@@ -488,6 +789,10 @@ def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg, out_dir):
       .then(function(data) {{
         window.__lightmap.initialFeatureCount = (data.features || []).length;
         initialLayer = mkShadowLayer(data).addTo({map_var});
+        if (_pipEnabled) {{
+          window._sh_feats = _indexFeatures(data.features || []);
+          _installPipClick();
+        }}
         setTimeout(function() {{
           {map_var}.removeLayer(preview);
         }}, 300);
@@ -519,6 +824,10 @@ def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg, out_dir):
             requestAnimationFrame(function(){{ cvs.style.opacity = '1'; }});
           }}
           if (initialLayer) {{ {map_var}.removeLayer(initialLayer); }}
+          if (_pipEnabled) {{
+            window._sh_feats = _indexFeatures(data.features || []);
+            _installPipClick();
+          }}
           window.__lightmap.status = 'done';
           mark('addedAt');
         }})

@@ -370,6 +370,11 @@ def _create_base_map(tiles="CartoDB positron", *, prefer_canvas=True):
         location=MAP_CENTER, zoom_start=16, tiles=tiles,
         width="100%", height="100%",
         prefer_canvas=prefer_canvas,
+        min_zoom=15, max_zoom=18,
+        # Constrain pan + zoom-out to MIT + Financial District + Fenway.
+        min_lat=42.340, max_lat=42.370,
+        min_lon=-71.110, max_lon=-71.045,
+        max_bounds=True,
     )
     m.get_root().html.add_child(folium.Element(
         "<style>html,body{margin:0;padding:0;height:100%;width:100%}</style>"
@@ -540,7 +545,7 @@ def build_day_map(target_time, altitude, azimuth, scale_pct,
     if cfg["shadow_mode"] == "inline":
         _add_building_layer(m, building_data)
     else:
-        add_building_layer(m, building_data, out_dir=OUT_DIR)
+        add_building_layer(m, building_data, out_dir=OUT_DIR, cfg=cfg)
     cmap = _make_shadow_cmap()
     add_shadow_layer(m, shadows, cmap, strategy=render_strategy, out_dir=OUT_DIR)
     _add_ui_plugins(m, theme="light")
