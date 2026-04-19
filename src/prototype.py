@@ -739,9 +739,35 @@ def build_dual_map(target_time, scale_pct):
     print("Loading food establishments...")
     places = load_food_establishments(scale_pct)
 
-    dm = DualMap(location=MAP_CENTER, zoom_start=14, tiles=None)
+    dm = DualMap(
+        location=MAP_CENTER, zoom_start=16, tiles=None,
+        min_zoom=15, max_zoom=18,
+        min_lat=INITIAL_BBOX[0], max_lat=INITIAL_BBOX[2],
+        min_lon=INITIAL_BBOX[1], max_lon=INITIAL_BBOX[3],
+        max_bounds=True,
+    )
     folium.TileLayer("CartoDB positron").add_to(dm.m1)
     folium.TileLayer("CartoDB dark_matter").add_to(dm.m2)
+
+    # folium silently drops min_zoom / max_zoom from the Map options
+    # when `tiles=None`, so the DualMap sub-maps end up without zoom
+    # limits even though we passed them. Patch each sub-map via JS so
+    # the zoom behavior matches every other renderer.
+    dm.get_root().script.add_child(folium.Element(
+        f"""(function() {{
+  function patch() {{
+    if (typeof {dm.m1.get_name()} === "undefined" ||
+        typeof {dm.m2.get_name()} === "undefined") {{
+      setTimeout(patch, 50); return;
+    }}
+    [{dm.m1.get_name()}, {dm.m2.get_name()}].forEach(function(map) {{
+      map.setMinZoom(15);
+      map.setMaxZoom(18);
+    }});
+  }}
+  patch();
+}})();"""
+    ))
 
     # Day side
     _add_building_layer(dm.m1, building_data)
@@ -1354,14 +1380,19 @@ def build_time_slider_map(target_time, scale_pct):
     var poiCache = new Map();
 
     function renderPois(altDeg) {
-      // Gate POIs to the night-leaning half of the day, mirroring the
-      // shadow gate. At altitude >= DAY_THRESHOLD we are firmly in day
-      // mode and the shadow layer is the story; clutter the map with
-      // lunch spots defeats that. When altitude drops below the
-      // threshold, POI markers appear and are filtered by
-      // opening_hours.
+      // POI visibility mirrors the slider's day/night chrome flip so
+      // the moment the slider icon turns to a sun, the yellow markers
+      // vanish. That crossover is at nightMix = 0.5, i.e. altitude
+      // (TWILIGHT_START + DAY_THRESHOLD) / 2. Keeping the markers on
+      // past that point looked like a glitch against the daytime
+      // basemap.
       poiLayer.clearLayers();
-      if (altDeg >= DAY_THRESHOLD) return;
+      var nightMix;
+      if (altDeg <= TWILIGHT_START) nightMix = 1;
+      else if (altDeg >= DAY_THRESHOLD) nightMix = 0;
+      else nightMix = 1 - (altDeg - TWILIGHT_START) /
+                          (DAY_THRESHOLD - TWILIGHT_START);
+      if (nightMix <= 0.5) return;
       var key = state.dateStr + ":" + state.slot;
       var feats;
       if (poiCache.has(key)) {
