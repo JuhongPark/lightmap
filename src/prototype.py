@@ -1728,12 +1728,12 @@ def build_map(target_time, scale_pct=1, dual=False, time_compare=False,
 def main():
     parser = argparse.ArgumentParser(description="LightMap prototype")
     parser.add_argument(
-        "--time", type=str, default="2025-07-15 14:00",
+        "--time", type=str, default="2026-04-20 14:00",
         help="Target time (YYYY-MM-DD HH:MM)",
     )
     parser.add_argument(
         "--night", action="store_true",
-        help="Force night mode (2025-07-15 22:00)",
+        help="Force night mode (2026-04-20 22:00)",
     )
     parser.add_argument(
         "--scale", type=int, default=1, choices=[0, 1, 10, 50, 100],
@@ -1766,7 +1766,7 @@ def main():
     args = parser.parse_args()
 
     if args.night:
-        target_time = datetime(2025, 7, 15, 22, 0, tzinfo=BOSTON_TZ)
+        target_time = datetime(2026, 4, 20, 22, 0, tzinfo=BOSTON_TZ)
     else:
         target_time = datetime.strptime(args.time, "%Y-%m-%d %H:%M")
         target_time = target_time.replace(tzinfo=BOSTON_TZ)
