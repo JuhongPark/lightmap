@@ -76,6 +76,7 @@ CAMBRIDGE_BUILDINGS_PATH = os.path.join(
 )
 BUILDINGS_DB_PATH = os.path.join(DATA_DIR, "buildings.db")
 OSM_POIS_PATH = os.path.join(DATA_DIR, "osm", "pois.geojson")
+TREES_PATH = os.path.join(DATA_DIR, "trees", "trees.geojson")
 
 HEATMAP_GRADIENT = {
     0.2: "#78350f", 0.4: "#d97706", 0.6: "#fbbf24",
@@ -280,6 +281,38 @@ def load_streetlights(scale_pct):
 
     print(f"  Total streetlights: {len(coords)}")
     return coords
+
+
+def load_trees():
+    """Load tree canopy polygons from the Cambridge GIS snapshot.
+
+    Each feature keeps its outer ring + a `height_m` property. The
+    time-slider shadow engine treats these as short buildings and
+    projects shadows from them the same way it does for real
+    buildings, so the shade layer includes tree shade automatically.
+    """
+    if not os.path.exists(TREES_PATH):
+        print(f"  Tree canopy file not found: {TREES_PATH}")
+        print(f"  Run scripts/download_trees.py to populate it")
+        return []
+    with open(TREES_PATH) as f:
+        gj = json.load(f)
+    out = []
+    for feat in gj.get("features", []):
+        geom = feat.get("geometry") or {}
+        if geom.get("type") != "Polygon":
+            continue
+        rings = geom.get("coordinates") or []
+        if not rings or not rings[0]:
+            continue
+        props = feat.get("properties") or {}
+        try:
+            h_m = float(props.get("height_m") or 10.0)
+        except (TypeError, ValueError):
+            h_m = 10.0
+        out.append({"ring": rings[0], "h_m": h_m})
+    print(f"  Tree canopy features: {len(out)}")
+    return out
 
 
 def load_osm_pois():
@@ -855,6 +888,32 @@ def build_time_slider_map(target_time, scale_pct):
         js_buildings.append([round(h_ft * 0.3048, 2), ring, bbox])
     print(f"  Inside INITIAL_BBOX: {len(js_buildings)} "
           f"(rejected {bbox_rejected})")
+
+    # Trees go into the same shadow-producing list as buildings. The
+    # JS engine does not distinguish between the two — a tree is just
+    # a short building for shadow-projection purposes. Heights from
+    # the Cambridge canopy snapshot default to 10 m so tree shadows
+    # come out roughly 3-4 m long at midday, stretching to ~40 m at
+    # golden-hour altitudes.
+    print("Loading tree canopy...")
+    trees = load_trees()
+    trees_added = 0
+    for t in trees:
+        ring = [[round(pt[0], 6), round(pt[1], 6)] for pt in t["ring"]]
+        xs = [pt[0] for pt in ring]
+        ys = [pt[1] for pt in ring]
+        fminx, fmaxx = min(xs), max(xs)
+        fminy, fmaxy = min(ys), max(ys)
+        # Defensive bbox intersection even though the downloader
+        # already filters to INITIAL_BBOX — keeps data and config in
+        # sync if INITIAL_BBOX is ever tightened.
+        if (fmaxx < bbox_min_lon or fminx > bbox_max_lon or
+                fmaxy < bbox_min_lat or fminy > bbox_max_lat):
+            continue
+        bbox = [fminx, fminy, fmaxx, fmaxy]
+        js_buildings.append([round(t["h_m"], 2), ring, bbox])
+        trees_added += 1
+    print(f"  Trees merged into shadow list: {trees_added}")
 
     # Rebuild the building_data for folium's static building layer too,
     # so the base layer matches the shadow-engine footprint set.

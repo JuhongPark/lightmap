@@ -50,7 +50,7 @@ The shadow engine computes sun position (pvlib) and projects each building footp
 | Cambridge streetlights | 6K | [Cambridge GIS](https://github.com/cambridgegis/cambridgegis_data_infra) | Brightness heatmap |
 | Boston food establishments (active licenses) | 3K | [data.boston.gov CKAN](https://data.boston.gov/dataset/active-food-establishment-licenses) | Standalone night map markers |
 | **OSM amenity POIs (with `opening_hours`)** | 760 inside viewport | [OpenStreetMap via Overpass API](https://overpass-turbo.eu/) | Time-slider time-aware venue markers |
-| Tree canopy | 244K polygons | Boston + Cambridge GIS | (Planned, not yet rendered) |
+| **Cambridge tree canopy (2018)** | ~11K polygons inside viewport | [Cambridge GIS](https://github.com/cambridgegis/cambridgegis_data_environmental) | Tree shade in the time-slider shadow engine. Each polygon is treated as a 10 m canopy and casts a shadow along the same sun angle as buildings. Boston's BPDA canopy (EPSG:2249, 1 GB shapefile) is a follow-up. |
 
 ### Time-slider data scope
 
@@ -105,15 +105,17 @@ This downloads:
 | `data/cambridge/streetlights/streetlights.geojson` | 2.7 MB | Cambridge GIS |
 | `data/safety/food_establishments.csv` | 180 KB | data.boston.gov CKAN |
 
-The time-slider adds one more dataset. Pull it with a separate script so the Overpass API is hit only when needed:
+The time-slider adds two more datasets. Pull them with separate scripts so the external APIs are hit only when needed:
 
 ```
 .venv/bin/python scripts/download_osm_pois.py
+.venv/bin/python scripts/download_trees.py
 ```
 
 | File | Size | Source |
 | --- | --- | --- |
 | `data/osm/pois.geojson` | ~150 KB | OpenStreetMap via Overpass API |
+| `data/trees/trees.geojson` | ~3.5 MB | Cambridge GIS (TopoJSON → GeoJSON, simplified to ~2 m tolerance) |
 
 ### 3. Pre-process buildings into SQLite
 
