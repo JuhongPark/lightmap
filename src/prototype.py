@@ -381,11 +381,11 @@ def _create_base_map(
         location=MAP_CENTER, zoom_start=16, tiles=tiles,
         width="100%", height="100%",
         prefer_canvas=prefer_canvas,
-        # min_zoom is 2 levels below zoom_start so users can pull back
-        # and see the wider Boston/Cambridge extent. max_zoom matches
-        # what CartoDB Positron/Dark Matter serve natively (18) so we
-        # never ask the tile server for zoom levels it does not have.
-        min_zoom=14, max_zoom=18,
+        # min_zoom is 1 level below zoom_start so users can pull back
+        # slightly for a wider overview but not so far that the shadow
+        # redraw cost explodes. max_zoom matches what CartoDB Positron
+        # and Dark Matter serve natively (18).
+        min_zoom=15, max_zoom=18,
         min_lat=min_lat, max_lat=max_lat,
         min_lon=min_lon, max_lon=max_lon,
         max_bounds=True,
