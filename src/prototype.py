@@ -723,11 +723,617 @@ def build_dual_map(target_time, scale_pct):
     return dm
 
 
+def build_time_slider_map(target_time, scale_pct):
+    """Client-side time slider with free date picker.
+
+    Ships building footprints + SunCalc to the browser. Shadows are
+    projected live in JS for any (date, time) the user scrubs to.
+    Sunrise/sunset markers on the slider track track the chosen date's
+    daylight window. When the sun drops below the horizon, the viewer
+    auto-swaps to the nighttime layer (Dark Matter tiles + streetlight
+    heatmap + food establishments).
+    """
+    print("Loading buildings...")
+    building_data, _ = load_buildings_with_parsed(scale_pct)
+    building_count = len(building_data["features"])
+    print(f"  Total buildings: {building_count}")
+    if building_count == 0:
+        print("ERROR: No buildings loaded.")
+        return None
+
+    # Extract footprints (outer ring) + height in meters for the JS
+    # shadow engine. Holes are dropped — shadow fidelity stays visually
+    # fine without them.
+    js_buildings = []
+    for feat in building_data["features"]:
+        geom = feat.get("geometry") or {}
+        if geom.get("type") != "Polygon":
+            continue
+        rings = geom.get("coordinates") or []
+        if not rings or not rings[0]:
+            continue
+        h_ft = feat.get("properties", {}).get("BLDG_HGT_2010", 0) or 0
+        try:
+            h_ft = float(h_ft)
+        except (TypeError, ValueError):
+            h_ft = 0.0
+        if h_ft <= 0:
+            continue
+        # Round coordinates to 6 decimals (~11 cm) to trim payload.
+        ring = [[round(pt[0], 6), round(pt[1], 6)] for pt in rings[0]]
+        js_buildings.append([round(h_ft * 0.3048, 2), ring])
+    print(f"  Shadow-capable buildings: {len(js_buildings)}")
+
+    print("Loading streetlights...")
+    coords = load_streetlights(scale_pct)
+    print("Loading food establishments...")
+    places = load_food_establishments(scale_pct)
+
+    m = _create_base_map("CartoDB positron")
+    _add_building_layer(m, building_data)
+
+    # Dark Matter tiles overlay, hidden by default. JS toggles on at night.
+    dark_tiles = folium.TileLayer(
+        "CartoDB dark_matter", name="Night tiles",
+        overlay=True, control=False, show=False,
+    )
+    dark_tiles.add_to(m)
+
+    streetlight_group = folium.FeatureGroup(
+        name="Streetlights", show=False, control=False,
+    )
+    if coords:
+        HeatMap(
+            coords, radius=12, blur=20, gradient=HEATMAP_GRADIENT,
+        ).add_to(streetlight_group)
+    streetlight_group.add_to(m)
+
+    food_group = folium.FeatureGroup(
+        name="Food Establishments", show=False, control=False,
+    )
+    for p in places:
+        popup_html = (
+            '<div style="font-family:sans-serif; font-size:12px;'
+            ' min-width:120px;">'
+            f'<b>{p["name"]}</b></div>'
+        )
+        folium.CircleMarker(
+            location=[p["lat"], p["lon"]],
+            radius=3, color="#fbbf24", fill=True, fill_opacity=0.8,
+            popup=folium.Popup(popup_html, max_width=200),
+        ).add_to(food_group)
+    food_group.add_to(m)
+
+    _add_ui_plugins(m, theme="light")
+    legend = _make_shadow_cmap()
+    legend.add_to(m)
+
+    slider_css = """
+<style>
+  #lm-slider-host {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    background: rgba(255, 255, 255, 0.92);
+    border-radius: 14px;
+    padding: 14px 22px 18px 22px;
+    box-shadow: 0 10px 32px rgba(15, 23, 42, 0.18);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                 "Helvetica Neue", Arial, sans-serif;
+    color: #1e293b;
+    width: 560px;
+    max-width: 92vw;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    user-select: none;
+    transition: background 0.4s ease, color 0.4s ease,
+                box-shadow 0.4s ease;
+  }
+  #lm-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  #lm-time-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 110px;
+  }
+  #lm-mode-icon {
+    font-size: 18px;
+    line-height: 1;
+    color: #a78bfa;
+    transition: color 0.4s ease;
+  }
+  #lm-time {
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: #1e293b;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    transition: color 0.4s ease;
+  }
+  #lm-date {
+    background: transparent;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-family: inherit;
+    font-size: 13px;
+    color: inherit;
+    cursor: pointer;
+    outline: none;
+    font-variant-numeric: tabular-nums;
+    transition: border-color 0.2s, color 0.4s ease;
+  }
+  #lm-date:hover, #lm-date:focus { border-color: #94a3b8; }
+  #lm-date::-webkit-calendar-picker-indicator {
+    cursor: pointer; opacity: 0.55;
+  }
+  #lm-play {
+    background: #f1f5f9;
+    color: #1e293b;
+    border: 1px solid #cbd5e1;
+    border-radius: 999px;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    cursor: pointer;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.2s, color 0.4s ease,
+                border-color 0.2s;
+  }
+  #lm-play:hover { background: #e2e8f0; border-color: #94a3b8; }
+
+  #lm-range-wrap {
+    position: relative;
+    padding-top: 18px;
+    padding-bottom: 2px;
+  }
+  .lm-sun-marker {
+    position: absolute;
+    top: 16px;
+    width: 2px;
+    height: 14px;
+    transform: translateX(-50%);
+    pointer-events: none;
+    z-index: 1;
+    transition: left 0.4s ease, background 0.4s ease;
+  }
+  #lm-sunrise-marker { background: #fbbf24; }
+  #lm-sunset-marker { background: #f97316; }
+  .lm-sun-label {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    font-size: 10px;
+    font-weight: 500;
+    color: #94a3b8;
+    pointer-events: none;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    transition: left 0.4s ease, color 0.4s ease;
+  }
+  #lm-sunrise-label::before { content: "\u25B2 "; color: #fbbf24; }
+  #lm-sunset-label::before { content: "\u25BC "; color: #f97316; }
+
+  #lm-range {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    background: #cbd5e1;
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+    margin: 0;
+    position: relative;
+    z-index: 2;
+    transition: background 0.4s ease;
+  }
+  #lm-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    background: #ffffff;
+    border: 2px solid #a78bfa;
+    cursor: pointer;
+    box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.2);
+    transition: box-shadow 0.15s, border-color 0.3s ease;
+  }
+  #lm-range::-webkit-slider-thumb:hover {
+    box-shadow: 0 0 0 6px rgba(167, 139, 250, 0.3);
+  }
+  #lm-range::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    background: #ffffff;
+    border: 2px solid #a78bfa;
+    cursor: pointer;
+    box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.2);
+    transition: box-shadow 0.15s, border-color 0.3s ease;
+  }
+
+  /* NIGHT theme overrides */
+  #lm-slider-host.night {
+    background: rgba(15, 23, 42, 0.92);
+    color: #e2e8f0;
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.4);
+  }
+  #lm-slider-host.night #lm-time { color: #e2e8f0; }
+  #lm-slider-host.night #lm-mode-icon { color: #fbbf24; }
+  #lm-slider-host.night #lm-date {
+    border-color: #334155; color: #e2e8f0;
+  }
+  #lm-slider-host.night #lm-date:hover,
+  #lm-slider-host.night #lm-date:focus {
+    border-color: #475569;
+  }
+  #lm-slider-host.night #lm-date::-webkit-calendar-picker-indicator {
+    filter: invert(0.8);
+  }
+  #lm-slider-host.night #lm-play {
+    background: #1e293b; color: #e2e8f0; border-color: #334155;
+  }
+  #lm-slider-host.night #lm-play:hover {
+    background: #334155; border-color: #475569;
+  }
+  #lm-slider-host.night #lm-range { background: #334155; }
+  #lm-slider-host.night #lm-range::-webkit-slider-thumb {
+    border-color: #fbbf24;
+    box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.2);
+  }
+  #lm-slider-host.night #lm-range::-webkit-slider-thumb:hover {
+    box-shadow: 0 0 0 6px rgba(251, 191, 36, 0.3);
+  }
+  #lm-slider-host.night #lm-range::-moz-range-thumb {
+    border-color: #fbbf24;
+    box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.2);
+  }
+  #lm-slider-host.night .lm-sun-label { color: #64748b; }
+</style>
+"""
+
+    slider_html = """
+<div id="lm-slider-host">
+  <div id="lm-row">
+    <div id="lm-time-wrap">
+      <span id="lm-mode-icon">\u2600</span>
+      <span id="lm-time">--:--</span>
+    </div>
+    <input type="date" id="lm-date" value="__INITIAL_DATE__">
+    <button id="lm-play" aria-label="Play or pause the time slider">
+      <span id="lm-play-icon">\u25B6</span>
+    </button>
+  </div>
+  <div id="lm-range-wrap">
+    <div class="lm-sun-label" id="lm-sunrise-label">--:--</div>
+    <div class="lm-sun-label" id="lm-sunset-label">--:--</div>
+    <div class="lm-sun-marker" id="lm-sunrise-marker"></div>
+    <div class="lm-sun-marker" id="lm-sunset-marker"></div>
+    <input type="range" id="lm-range" min="0" max="47" step="1" value="28">
+  </div>
+</div>
+"""
+
+    # Shadow projection runs client-side. SunCalc (CDN) gives sun
+    # altitude/azimuth for any (date, location). Projection math
+    # mirrors src/shadow/compute.py:compute_shadow — translate the
+    # footprint opposite the sun by h / tan(altitude), then take the
+    # convex hull of original + translated. MAX_SHADOW_LENGTH caps
+    # absurd shadows near sunrise/sunset (altitude near 0).
+    slider_js_template = """
+<script src="https://cdn.jsdelivr.net/npm/suncalc@1.9.0/suncalc.min.js"></script>
+<script>
+(function() {
+  var BUILDINGS = __BUILDINGS__;
+  var LAT_CENTER = __CENTER_LAT__;
+  var LON_CENTER = __CENTER_LON__;
+  var INITIAL_DATE = "__INITIAL_DATE__";
+  var M_PER_DEG_LAT = 111320;
+  var M_PER_DEG_LON = 111320 * Math.cos(LAT_CENTER * Math.PI / 180);
+  var MAX_SHADOW_LENGTH = 500;
+
+  function pad(n) { return n < 10 ? "0" + n : "" + n; }
+  function d2r(d) { return d * Math.PI / 180; }
+
+  // US DST rough check (2nd Sun of March to 1st Sun of November).
+  // Used so Boston-local wall-clock hour on the slider maps to the
+  // correct UTC moment regardless of the viewer's timezone.
+  function bostonUtcOffset(year, monthIdx, day) {
+    var march = new Date(Date.UTC(year, 2, 1));
+    var dstStart = new Date(Date.UTC(
+      year, 2, 1 + ((7 - march.getUTCDay()) % 7) + 7
+    ));
+    var november = new Date(Date.UTC(year, 10, 1));
+    var dstEnd = new Date(Date.UTC(
+      year, 10, 1 + ((7 - november.getUTCDay()) % 7)
+    ));
+    var today = new Date(Date.UTC(year, monthIdx, day));
+    return (today >= dstStart && today < dstEnd) ? -4 : -5;
+  }
+
+  // Returns a Date whose UTC moment equals Boston wall-clock
+  // {year, month, day, hour, min}.
+  function bostonDate(year, monthIdx, day, hour, min) {
+    var off = bostonUtcOffset(year, monthIdx, day);
+    return new Date(Date.UTC(year, monthIdx, day, hour - off, min));
+  }
+
+  // Andrew's monotone chain convex hull in 2D. Vertices: [[lon, lat]...]
+  function convexHull(points) {
+    if (points.length < 3) return points.slice();
+    var pts = points.slice().sort(function(a, b) {
+      return a[0] - b[0] || a[1] - b[1];
+    });
+    function cross(o, a, b) {
+      return (a[0] - o[0]) * (b[1] - o[1]) -
+             (a[1] - o[1]) * (b[0] - o[0]);
+    }
+    var lower = [];
+    for (var i = 0; i < pts.length; i++) {
+      while (lower.length >= 2 &&
+        cross(lower[lower.length - 2], lower[lower.length - 1], pts[i]) <= 0) {
+        lower.pop();
+      }
+      lower.push(pts[i]);
+    }
+    var upper = [];
+    for (var j = pts.length - 1; j >= 0; j--) {
+      while (upper.length >= 2 &&
+        cross(upper[upper.length - 2], upper[upper.length - 1], pts[j]) <= 0) {
+        upper.pop();
+      }
+      upper.push(pts[j]);
+    }
+    lower.pop(); upper.pop();
+    return lower.concat(upper);
+  }
+
+  function setup() {
+    if (typeof __MAP_NAME__ === "undefined" || !window.L || !window.SunCalc) {
+      setTimeout(setup, 100); return;
+    }
+    var map = __MAP_NAME__;
+    var dark = __DARK_NAME__;
+    var lights = __STREET_NAME__;
+    var food = __FOOD_NAME__;
+    var host = document.getElementById("lm-slider-host");
+    var rangeEl = document.getElementById("lm-range");
+    var dateEl = document.getElementById("lm-date");
+    var timeEl = document.getElementById("lm-time");
+    var iconEl = document.getElementById("lm-mode-icon");
+    var playEl = document.getElementById("lm-play");
+    var playIconEl = document.getElementById("lm-play-icon");
+    var srMarker = document.getElementById("lm-sunrise-marker");
+    var ssMarker = document.getElementById("lm-sunset-marker");
+    var srLabel = document.getElementById("lm-sunrise-label");
+    var ssLabel = document.getElementById("lm-sunset-label");
+    if (!host || !rangeEl || !dateEl) { setTimeout(setup, 100); return; }
+
+    var state = {
+      dateStr: INITIAL_DATE, slot: parseInt(rangeEl.value, 10),
+      playing: false, playTimer: null, shadowLayer: null
+    };
+
+    function parseDateStr(s) {
+      var parts = s.split("-").map(Number);
+      return { y: parts[0], m: parts[1] - 1, d: parts[2] };
+    }
+
+    function sunAt(dateStr, slot) {
+      var p = parseDateStr(dateStr);
+      var hour = Math.floor(slot / 2);
+      var min = (slot % 2) * 30;
+      var d = bostonDate(p.y, p.m, p.d, hour, min);
+      var pos = SunCalc.getPosition(d, LAT_CENTER, LON_CENTER);
+      // SunCalc: azimuth measured from south, west-positive.
+      // Convert to compass bearing (from north, clockwise) to match
+      // pvlib / compute.py convention.
+      return {
+        alt: pos.altitude * 180 / Math.PI,
+        az: (pos.azimuth * 180 / Math.PI + 180 + 360) % 360,
+        hour: hour, min: min
+      };
+    }
+
+    function projectShadow(ring, hm, altDeg, azDeg) {
+      if (altDeg <= 0) return null;
+      var lenM = Math.min(hm / Math.tan(d2r(altDeg)), MAX_SHADOW_LENGTH);
+      var oppRad = d2r((azDeg + 180) % 360);
+      var dx = lenM * Math.sin(oppRad);
+      var dy = lenM * Math.cos(oppRad);
+      var dLon = dx / M_PER_DEG_LON;
+      var dLat = dy / M_PER_DEG_LAT;
+      var pts = [];
+      for (var i = 0; i < ring.length; i++) pts.push(ring[i]);
+      for (var j = 0; j < ring.length; j++) {
+        pts.push([ring[j][0] + dLon, ring[j][1] + dLat]);
+      }
+      return convexHull(pts);
+    }
+
+    function renderShadows(altDeg, azDeg) {
+      if (state.shadowLayer) {
+        map.removeLayer(state.shadowLayer);
+        state.shadowLayer = null;
+      }
+      if (altDeg <= 0) return;
+      var feats = [];
+      for (var i = 0; i < BUILDINGS.length; i++) {
+        var b = BUILDINGS[i];
+        var hull = projectShadow(b[1], b[0], altDeg, azDeg);
+        if (!hull || hull.length < 3) continue;
+        var ring = hull.slice();
+        ring.push(hull[0]);
+        feats.push({
+          type: "Feature",
+          geometry: { type: "Polygon", coordinates: [ring] },
+          properties: { h: b[0] }
+        });
+      }
+      state.shadowLayer = L.geoJson(
+        { type: "FeatureCollection", features: feats },
+        {
+          interactive: false,
+          style: function(f) {
+            var h = f.properties.h;
+            var op = Math.min(0.18 + (h / 60) * 0.22, 0.45);
+            return {
+              fillColor: "#0f172a", color: "#0f172a",
+              weight: 0.2, fillOpacity: op, opacity: op
+            };
+          }
+        }
+      ).addTo(map);
+    }
+
+    function renderTheme(isDay) {
+      if (isDay) {
+        host.classList.remove("night");
+        iconEl.textContent = "\u2600";
+        if (map.hasLayer(dark)) map.removeLayer(dark);
+        if (map.hasLayer(lights)) map.removeLayer(lights);
+        if (map.hasLayer(food)) map.removeLayer(food);
+      } else {
+        host.classList.add("night");
+        iconEl.textContent = "\u263E";
+        if (!map.hasLayer(dark)) dark.addTo(map);
+        if (!map.hasLayer(lights)) lights.addTo(map);
+        if (!map.hasLayer(food)) food.addTo(map);
+      }
+    }
+
+    function updateSunMarkers() {
+      var p = parseDateStr(state.dateStr);
+      // Noon Boston time is a safe reference for sunrise/sunset.
+      var noon = bostonDate(p.y, p.m, p.d, 12, 0);
+      var t = SunCalc.getTimes(noon, LAT_CENTER, LON_CENTER);
+      if (!t.sunrise || isNaN(t.sunrise.getTime())) return;
+      var off = bostonUtcOffset(p.y, p.m, p.d);
+      // Convert UTC to Boston local hour/min so the slider mapping
+      // (slot = local hour * 2 + min/30) is consistent.
+      function localHm(dt) {
+        var utcH = dt.getUTCHours() + (dt.getUTCMinutes() / 60);
+        var localH = (utcH + off + 24) % 24;
+        var hh = Math.floor(localH);
+        var mm = Math.round((localH - hh) * 60);
+        if (mm === 60) { hh = (hh + 1) % 24; mm = 0; }
+        return [hh, mm];
+      }
+      var sr = localHm(t.sunrise);
+      var ss = localHm(t.sunset);
+      var srFrac = sr[0] + sr[1] / 60;
+      var ssFrac = ss[0] + ss[1] / 60;
+      // Slot 0..47 maps to hours 0..23.5. The slider thumb travels
+      // across the full track, so position 0% = hour 0, 100% = hour 23.5.
+      var pctSr = (srFrac / 23.5) * 100;
+      var pctSs = (ssFrac / 23.5) * 100;
+      srMarker.style.left = pctSr + "%";
+      ssMarker.style.left = pctSs + "%";
+      srLabel.style.left = pctSr + "%";
+      ssLabel.style.left = pctSs + "%";
+      srLabel.textContent = pad(sr[0]) + ":" + pad(sr[1]);
+      ssLabel.textContent = pad(ss[0]) + ":" + pad(ss[1]);
+    }
+
+    function updateScene() {
+      var s = sunAt(state.dateStr, state.slot);
+      timeEl.textContent = pad(s.hour) + ":" + pad(s.min);
+      rangeEl.value = state.slot;
+      renderTheme(s.alt > 0);
+      renderShadows(s.alt, s.az);
+    }
+
+    rangeEl.addEventListener("input", function() {
+      state.slot = parseInt(rangeEl.value, 10);
+      updateScene();
+    });
+
+    dateEl.addEventListener("change", function() {
+      if (!dateEl.value) return;
+      state.dateStr = dateEl.value;
+      updateSunMarkers();
+      updateScene();
+    });
+
+    playEl.addEventListener("click", function() {
+      if (state.playing) {
+        clearInterval(state.playTimer);
+        state.playTimer = null;
+        state.playing = false;
+        playIconEl.textContent = "\u25B6";
+      } else {
+        state.playTimer = setInterval(function() {
+          state.slot = (state.slot + 1) % 48;
+          updateScene();
+        }, 400);
+        state.playing = true;
+        playIconEl.textContent = "\u23F8";
+      }
+    });
+
+    updateSunMarkers();
+    updateScene();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", setup);
+  } else {
+    setup();
+  }
+})();
+</script>
+"""
+    slider_js = (slider_js_template
+        .replace("__BUILDINGS__",
+                 json.dumps(js_buildings, separators=(",", ":")))
+        .replace("__MAP_NAME__", m.get_name())
+        .replace("__DARK_NAME__", dark_tiles.get_name())
+        .replace("__STREET_NAME__", streetlight_group.get_name())
+        .replace("__FOOD_NAME__", food_group.get_name())
+        .replace("__INITIAL_DATE__", target_time.strftime("%Y-%m-%d"))
+        .replace("__CENTER_LAT__", str(MAP_CENTER[0]))
+        .replace("__CENTER_LON__", str(MAP_CENTER[1])))
+    slider_html = slider_html.replace(
+        "__INITIAL_DATE__", target_time.strftime("%Y-%m-%d")
+    )
+
+    m.get_root().html.add_child(
+        folium.Element(slider_css + slider_html + slider_js)
+    )
+
+    date_str = target_time.strftime("%b %d, %Y")
+    _add_info_panel(m, [
+        "<b>LightMap</b> &mdash; Time Slider",
+        f'<span style="color:#64748b;">{date_str}</span>',
+        f"{building_count:,} buildings &middot; 24-hour playback",
+        '<span style="color:#64748b; font-size:11px;">'
+        "Drag the slider. Streetlights turn on after sunset.</span>",
+    ])
+
+    return m
+
+
 # ---------------------------------------------------------------------------
 # Entry points
 # ---------------------------------------------------------------------------
 
 def build_map(target_time, scale_pct=1, dual=False, time_compare=False,
+              time_slider=False,
               render_strategy=DEFAULT_RENDER_STRATEGY, out_filename=None):
     os.makedirs(OUT_DIR, exist_ok=True)
     # Each strategy writes to its own HTML file so benchmark runs can
@@ -741,7 +1347,9 @@ def build_map(target_time, scale_pct=1, dual=False, time_compare=False,
             out_filename = f"prototype_{render_strategy}.html"
     out_path = os.path.join(OUT_DIR, out_filename)
 
-    if time_compare:
+    if time_slider:
+        m = build_time_slider_map(target_time, scale_pct)
+    elif time_compare:
         m = build_time_map(target_time, scale_pct)
     elif dual:
         m = build_dual_map(target_time, scale_pct)
@@ -794,6 +1402,11 @@ def main():
         help="Shadow animation across 6 time steps (7 AM - 5 PM)",
     )
     parser.add_argument(
+        "--time-slider", action="store_true",
+        help="24-hour slider. Shadows by day, streetlights by night, "
+             "auto day/night swap on sunrise/sunset",
+    )
+    parser.add_argument(
         "--render-strategy", default=DEFAULT_RENDER_STRATEGY,
         choices=list(RENDER_STRATEGIES.keys()),
         help="Browser-side rendering strategy. See RENDER_STRATEGIES. "
@@ -814,6 +1427,7 @@ def main():
 
     build_map(target_time, args.scale, dual=args.dual,
               time_compare=args.time_compare,
+              time_slider=args.time_slider,
               render_strategy=args.render_strategy,
               out_filename=args.out)
 

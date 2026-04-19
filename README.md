@@ -105,6 +105,7 @@ Opens `docs/prototype.html` in your browser. Available flags:
 | `--time "YYYY-MM-DD HH:MM"` | Render a specific timestamp. |
 | `--dual` | Render day and night side by side on one synchronized map. |
 | `--time-compare` | Shadow animation across six hours with a playback slider. |
+| `--time-slider` | 24-hour playback. Shadows move with the sun during the day. Streetlights and food-establishment markers appear automatically after sunset. |
 
 ### 5. Run tests
 
