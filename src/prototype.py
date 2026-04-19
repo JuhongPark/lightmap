@@ -381,10 +381,11 @@ def _create_base_map(
         location=MAP_CENTER, zoom_start=16, tiles=tiles,
         width="100%", height="100%",
         prefer_canvas=prefer_canvas,
-        # min_zoom pinned to zoom_start so the user cannot zoom out past
-        # the initial view (zoom < 16 explodes the redraw cost). User
-        # can zoom in up to 20 for street-level inspection.
-        min_zoom=16, max_zoom=20,
+        # min_zoom is 2 levels below zoom_start so users can pull back
+        # and see the wider Boston/Cambridge extent. max_zoom matches
+        # what CartoDB Positron/Dark Matter serve natively (18) so we
+        # never ask the tile server for zoom levels it does not have.
+        min_zoom=14, max_zoom=18,
         min_lat=min_lat, max_lat=max_lat,
         min_lon=min_lon, max_lon=max_lon,
         max_bounds=True,
@@ -1190,17 +1191,6 @@ def build_time_slider_map(target_time, scale_pct):
       dateStr: INITIAL_DATE, slot: parseInt(rangeEl.value, 10),
       playing: false, playTimer: null, shadowLayer: null
     };
-
-    // CartoDB Positron and Dark Matter ship tiles only up to zoom 18.
-    // We expose zoom 20 so users can inspect building detail; letting
-    // Leaflet upscale the zoom-18 tile keeps the image visible (a bit
-    // soft) instead of going blank past 18.
-    map.eachLayer(function(l) {
-      if (l instanceof L.TileLayer) {
-        l.options.maxNativeZoom = 18;
-        l.options.maxZoom = 20;
-      }
-    });
 
     function parseDateStr(s) {
       var parts = s.split("-").map(Number);
