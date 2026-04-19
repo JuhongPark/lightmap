@@ -116,13 +116,17 @@ def _shadow_feature(shadow_poly, height_ft, shadow_len_m):
                               preserve_topology=True)
     if simp.is_empty:
         simp = shadow_poly
-    # Dilate 4 m. Without this, the per-building convex-hull shadows
-    # leave multi-meter gaps between neighboring footprints (along
-    # MIT's tight alleys, sub-5 m wide), which render as bright strips
-    # exactly where the user expects continuous shade. 4 m closes the
-    # common alley widths (1-8 m) without visibly extending shadows
-    # into streets.
-    simp = simp.buffer(4.0 / 111000.0)
+    # If simplification produced a GeometryCollection (can happen when
+    # the input building footprint is a multi-polygon or has weird
+    # edges), fall back to the largest polygon. Drop the feature if
+    # no usable polygon remains.
+    if simp.geom_type == "GeometryCollection" or simp.geom_type == "MultiPolygon":
+        poly = _extract_polygon(simp)
+        if poly is None:
+            return None
+        simp = poly
+    if simp.geom_type != "Polygon":
+        return None
     coords = [
         (round(x, RENDER_COORD_PRECISION), round(y, RENDER_COORD_PRECISION))
         for x, y in simp.exterior.coords
@@ -176,7 +180,10 @@ def compute_all_shadows(source, dt, height_field="BLDG_HGT_2010"):
         shadow, shadow_len = compute_shadow(poly, height_ft, altitude, azimuth)
         if shadow is None:
             continue
-        features.append(_shadow_feature(shadow, height_ft, shadow_len))
+        feat = _shadow_feature(shadow, height_ft, shadow_len)
+        if feat is None:
+            continue
+        features.append(feat)
     return features, altitude, azimuth
 
 
@@ -334,7 +341,8 @@ def compute_shadow_coverage_pil(shadow_polys, resolution_m=10.0, shrink_px=0.7):
 
 
 def render_shadows_png(shadow_polys, out_path, *, resolution_m=2.0,
-                       shrink_px=0.5, fill="#1f2937", alpha=115):
+                       shrink_px=0.5, fill="#1f2937", alpha=115,
+                       blur_px=0.0, union_all=False):
     """Server-side rasterize the shadow set into a PNG for L.imageOverlay.
 
     Used by the r8 render strategy. The image is drawn in RGBA mode so
@@ -364,6 +372,17 @@ def render_shadows_png(shadow_polys, out_path, *, resolution_m=2.0,
         Image.new("RGBA", (4, 4), (0, 0, 0, 0)).save(out_path, "PNG", optimize=True)
         return 4, 4, bounds_latlng
 
+    if union_all:
+        # Single merged geometry so adjacent shadows share one filled
+        # region instead of reading as distinct rectangular boxes. The
+        # rasterization output is the same shade field, just without
+        # per-polygon internal edges.
+        merged = unary_union(non_empty)
+        if merged.geom_type == "Polygon":
+            non_empty = [merged]
+        elif merged.geom_type == "MultiPolygon":
+            non_empty = list(merged.geoms)
+
     width_m = (maxx - minx) * M_PER_DEG_LON
     height_m = (maxy - miny) * M_PER_DEG_LAT
     W = max(1, int(round(width_m / resolution_m)))
@@ -372,40 +391,68 @@ def render_shadows_png(shadow_polys, out_path, *, resolution_m=2.0,
     dx = W / (maxx - minx)
     dy = H / (maxy - miny)
 
-    flat = shapely.get_coordinates(non_empty)
-    counts = shapely.get_num_coordinates(non_empty).astype(np.int64)
-    px = (flat[:, 0] - minx) * dx
-    py = (maxy - flat[:, 1]) * dy
-
-    if shrink_px > 0:
-        starts = np.empty_like(counts)
-        starts[0] = 0
-        np.cumsum(counts[:-1], out=starts[1:])
-        sum_x = np.add.reduceat(px, starts)
-        sum_y = np.add.reduceat(py, starts)
-        cx = sum_x / counts
-        cy = sum_y / counts
-        cx_rep = np.repeat(cx, counts)
-        cy_rep = np.repeat(cy, counts)
-        dxv = px - cx_rep
-        dyv = py - cy_rep
-        norms = np.sqrt(dxv * dxv + dyv * dyv)
-        norms = np.where(norms < 1e-12, 1.0, norms)
-        scale = np.maximum(0.0, 1.0 - shrink_px / norms)
-        px = cx_rep + dxv * scale
-        py = cy_rep + dyv * scale
-
-    splits = np.cumsum(counts)[:-1]
-    per_x = np.split(px, splits)
-    per_y = np.split(py, splits)
-
     hx = fill.lstrip("#")
-    fill_rgba = (int(hx[0:2], 16), int(hx[2:4], 16), int(hx[4:6], 16), alpha)
+    fill_rgb = (int(hx[0:2], 16), int(hx[2:4], 16), int(hx[4:6], 16))
 
-    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    for xs, ys in zip(per_x, per_y):
-        draw.polygon(list(zip(xs.tolist(), ys.tolist())), fill=fill_rgba)
+    # Draw shadows as a grayscale mask (alpha-only). Keeping RGB
+    # uniform lets PNG compress the whole image as "solid color +
+    # varying alpha" which is tiny; a straight-alpha RGBA composite
+    # would put gradients in every channel and blow up file size
+    # (we measured ~47 MB at 1-m grid + 3 px blur vs ~2 MB with this
+    # mask approach).
+    #
+    # Handle polygons with holes (interior rings) explicitly: draw
+    # each exterior ring filled, then re-draw each interior ring as
+    # zero alpha. Without this the naive
+    # `shapely.get_coordinates(polygon)` flatten treats ext+int as a
+    # single closed loop, producing a self-intersecting path which PIL
+    # scanline-fills with even-odd wind rule and leaves sub-areas
+    # unfilled — we observed this dropping MIT Stata Center's entire
+    # NE shadow region when the merged MultiPolygon had a large
+    # exterior + 58 holes around the MIT cluster.
+    mask = Image.new("L", (W, H), 0)
+    draw = ImageDraw.Draw(mask)
+
+    def _xform_ring(ring_coords):
+        rx = (np.asarray([c[0] for c in ring_coords]) - minx) * dx
+        ry = (maxy - np.asarray([c[1] for c in ring_coords])) * dy
+        if shrink_px > 0 and len(rx) >= 3:
+            cxm, cym = rx.mean(), ry.mean()
+            dxv = rx - cxm
+            dyv = ry - cym
+            n = np.sqrt(dxv * dxv + dyv * dyv)
+            n = np.where(n < 1e-12, 1.0, n)
+            s = np.maximum(0.0, 1.0 - shrink_px / n)
+            rx = cxm + dxv * s
+            ry = cym + dyv * s
+        return list(zip(rx.tolist(), ry.tolist()))
+
+    from shapely.geometry import Polygon as _Polygon, MultiPolygon as _MultiPolygon
+    polys_iter = []
+    for g in non_empty:
+        if isinstance(g, _Polygon):
+            polys_iter.append(g)
+        elif isinstance(g, _MultiPolygon):
+            polys_iter.extend(g.geoms)
+    for poly in polys_iter:
+        draw.polygon(_xform_ring(list(poly.exterior.coords)), fill=alpha)
+        for hole in poly.interiors:
+            draw.polygon(_xform_ring(list(hole.coords)), fill=0)
+
+    if blur_px and blur_px > 0:
+        from PIL import ImageFilter
+        mask = mask.filter(ImageFilter.GaussianBlur(radius=float(blur_px)))
+        # Quantize to 8 alpha levels so the blurred gradient compresses
+        # well. Eye cannot distinguish 8 vs 256 alpha steps on a soft
+        # shadow gradient, but PNG encoder certainly can (~5-10x size).
+        mask_arr = np.asarray(mask, dtype=np.int32)
+        mask_arr = ((mask_arr + 16) // 32) * 32
+        mask_arr = np.clip(mask_arr, 0, 255).astype(np.uint8)
+        mask = Image.fromarray(mask_arr, "L")
+
+    # Compose final RGBA: constant fill color, alpha from mask.
+    rgb = Image.new("RGB", (W, H), fill_rgb)
+    img = Image.merge("RGBA", (*rgb.split(), mask))
 
     img.save(out_path, "PNG", optimize=True)
     return W, H, bounds_latlng

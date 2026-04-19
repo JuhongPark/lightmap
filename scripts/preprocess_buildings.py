@@ -69,12 +69,21 @@ def insert_features(conn, features, city, height_conversion=1.0):
         if city == "cambridge":
             h = props.get("TOP_GL")
             if h is None or h <= 0:
-                continue
+                # Cambridge TOP_GL missing: assume ~2-story residential.
+                # Source data drops these silently, which leaves ~18 %
+                # of Boston buildings with no footprint AND no shadow.
+                # A 20 ft default casts a ~10 ft (3 m) shadow at 2 pm,
+                # visible on the 2 m-per-px shadow PNG. Better an honest
+                # default than a missing building.
+                h = 6.1  # 20 ft in meters
             height_ft = round(h * 3.28084, 1)
         else:
             h = props.get("BLDG_HGT_2010")
             if h is None or h <= 0:
-                continue
+                # Boston: 23 487 of 128 608 buildings (18.3 %) have
+                # BLDG_HGT_2010 NULL or 0 in the 2010 vintage. Default
+                # to 20 ft for the same reason as above.
+                h = 20.0
             height_ft = float(h)
         try:
             geom = shape(feat["geometry"])
