@@ -236,6 +236,6 @@ Results dated 2026-04-18 on 12th Gen i3-1220P / WSL2 Ubuntu 24.04 (same host as 
 | File | Change |
 |------|--------|
 | `src/prototype.py` | Add `--coord-precision` (or per-layer args) to geojson writers. Default 5 (see revised recommendation). |
-| `docs/deploy-size-trim-plan.md` | This file. Keep updated with browser-bench follow-up numbers. |
+| `planning/deploy-size-trim-plan.md` | This file. Keep updated with browser-bench follow-up numbers. |
 | `.gitignore` | Stop ignoring `docs/shadows.geojson`, `docs/buildings.geojson`, `*_initial.geojson`, `shadows.png`. Keep ignoring `.gz` sidecars. |
 | `docs/index.html` | New. Thin redirect to `prototype.html` so `/` serves the demo. |

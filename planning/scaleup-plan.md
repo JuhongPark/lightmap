@@ -138,4 +138,4 @@ Verify:
 | `scripts/download_data.py` | Add Boston buildings download |
 | `src/prototype.py` | Add --scale parameter, load both cities |
 | `scripts/screenshot.py` | Pass --scale through |
-| `docs/prototype-plan.md` | Update stage status as completed |
+| `planning/prototype-plan.md` | Update stage status as completed |

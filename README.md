@@ -43,7 +43,7 @@ The shadow engine computes sun position (pvlib) and projects each building footp
 | Streetlights | 80K | data.boston.gov + Cambridge GIS |
 | Tree canopy | 144K | Boston + Cambridge GIS |
 
-See [docs/data-catalog.md](docs/data-catalog.md) for the full data catalog.
+See [planning/data-catalog.md](planning/data-catalog.md) for the full data catalog.
 
 ## Getting Started
 
@@ -148,19 +148,20 @@ Measures each stage of the day pipeline at 100% scale, best-of-5 runs.
 .venv/bin/python scripts/benchmark.py
 ```
 
-See [docs/optimization-plan.md](docs/optimization-plan.md) for the full v1 through v7 optimization history and bottleneck analysis.
+See [planning/optimization-plan.md](planning/optimization-plan.md) for the full v1 through v7 optimization history and bottleneck analysis.
 
 ## Documentation
 
 Documentation is being added. This section will be updated as new documents are created.
 
-- [Project Description](docs/project.md) -- Problem, solution plan, architecture, data sources.
-- [Data Catalog](docs/data-catalog.md) -- All datasets, APIs, and validation results.
-- [Technology Research](docs/tech-research.md) -- Tech stack, decisions, and competitor analysis.
-- [Optimization Plan](docs/optimization-plan.md) -- Step-by-step day pipeline optimization from 102s to roughly 12s of compute.
-- [Render Optimization Plan](docs/render-optimization-plan.md) -- r0 through r9 browser-side render strategies, from inline SVG that never loads to PNG-then-vector hybrid with a 350 ms preview.
-- [Bench Protocol](docs/bench-protocol.md) -- Checklist and red flags for producing trustworthy bench numbers.
-- [Course Information](docs/course.md) -- MIT 1.001 course details and grading rubric.
+- [Project Description](planning/project.md) -- Problem, solution plan, architecture, data sources.
+- [Data Catalog](planning/data-catalog.md) -- All datasets, APIs, and validation results.
+- [Technology Research](planning/tech-research.md) -- Tech stack, decisions, and competitor analysis.
+- [Optimization Plan](planning/optimization-plan.md) -- Step-by-step day pipeline optimization from 102s to roughly 12s of compute.
+- [Render Optimization Plan](planning/render-optimization-plan.md) -- r0 through r13 browser-side render strategies, from inline SVG that never loads to PNG-raster-primary with merged shadows.
+- [Deploy Size Trim Plan](planning/deploy-size-trim-plan.md) -- Coordinate precision trim, bucket merge, raster-primary rendering experiments.
+- [Bench Protocol](planning/bench-protocol.md) -- Checklist and red flags for producing trustworthy bench numbers.
+- [Course Information](planning/course.md) -- MIT 1.001 course details and grading rubric.
 
 ## License
 
