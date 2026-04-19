@@ -34,6 +34,7 @@ from shadow.compute import (
 )
 from render.strategies import (
     DEFAULT_RENDER_STRATEGY,
+    INITIAL_BBOX,
     RENDER_STRATEGIES,
     SHADOW_CMAP_COLORS,
     add_building_layer,
@@ -360,24 +361,32 @@ def _load_buildings_and_shadows(scale_pct, target_time):
 # to src/render/strategies.py. This module only imports the public API.
 
 
-def _create_base_map(tiles="CartoDB positron", *, prefer_canvas=True):
+def _create_base_map(
+    tiles="CartoDB positron", *, prefer_canvas=True,
+    min_lat=42.310, max_lat=42.395,
+    min_lon=-71.225, max_lon=-70.995,
+):
     # prefer_canvas=True switches Leaflet to Canvas rendering instead of
     # SVG. SVG is fine for hundreds of polygons but chokes on the 123K
     # shadow polygons we render at 100% scale, where every feature becomes
     # a DOM node. Canvas draws them into a single <canvas> element, so
     # the browser handles the map smoothly even at the full city scale.
+    #
+    # The default pan bounds cover Harvard/Somerville in the north down
+    # to South Boston/Dorchester in the south. Callers that only ship
+    # data for a narrower region (e.g. time-slider with INITIAL_BBOX
+    # cutoff) should pass tighter min/max lat/lon so the viewport
+    # matches the data.
     m = folium.Map(
         location=MAP_CENTER, zoom_start=16, tiles=tiles,
         width="100%", height="100%",
         prefer_canvas=prefer_canvas,
         # min_zoom pinned to zoom_start so the user cannot zoom out past
         # the initial view (zoom < 16 explodes the redraw cost). User
-        # can still zoom in to 18 for detail inspection.
-        min_zoom=16, max_zoom=18,
-        # Pan-able area. North to Harvard/Somerville, west past Watertown,
-        # east to Logan Airport, south into South Boston/Dorchester.
-        min_lat=42.310, max_lat=42.395,
-        min_lon=-71.225, max_lon=-70.995,
+        # can zoom in up to 20 for street-level inspection.
+        min_zoom=16, max_zoom=20,
+        min_lat=min_lat, max_lat=max_lat,
+        min_lon=min_lon, max_lon=max_lon,
         max_bounds=True,
     )
     m.get_root().html.add_child(folium.Element(
@@ -741,10 +750,22 @@ def build_time_slider_map(target_time, scale_pct):
         print("ERROR: No buildings loaded.")
         return None
 
-    # Extract footprints (outer ring) + height in meters for the JS
-    # shadow engine. Holes are dropped — shadow fidelity stays visually
-    # fine without them.
+    # Hard data cutoff: restrict every dataset (buildings, streetlights,
+    # food) to INITIAL_BBOX = (min_lat, min_lon, max_lat, max_lon). No
+    # background tier — anything outside the box is simply excluded.
+    # Trims file size and speeds up first paint without sacrificing
+    # the Boston/Cambridge core that the app is actually about.
+    bbox_min_lat, bbox_min_lon, bbox_max_lat, bbox_max_lon = INITIAL_BBOX
+
+    def _in_bbox_latlon(lat, lon):
+        return (bbox_min_lat <= lat <= bbox_max_lat
+                and bbox_min_lon <= lon <= bbox_max_lon)
+
+    # Extract footprints (outer ring) + height in meters + bbox for the
+    # JS shadow engine. Holes are dropped. bbox lets the browser reject
+    # out-of-view buildings in O(1) before running convex hull.
     js_buildings = []
+    bbox_rejected = 0
     for feat in building_data["features"]:
         geom = feat.get("geometry") or {}
         if geom.get("type") != "Polygon":
@@ -759,17 +780,58 @@ def build_time_slider_map(target_time, scale_pct):
             h_ft = 0.0
         if h_ft <= 0:
             continue
-        # Round coordinates to 6 decimals (~11 cm) to trim payload.
         ring = [[round(pt[0], 6), round(pt[1], 6)] for pt in rings[0]]
-        js_buildings.append([round(h_ft * 0.3048, 2), ring])
-    print(f"  Shadow-capable buildings: {len(js_buildings)}")
+        xs = [pt[0] for pt in ring]
+        ys = [pt[1] for pt in ring]
+        bbox = [min(xs), min(ys), max(xs), max(ys)]
+        # Intersection with INITIAL_BBOX: bbox = [minLon, minLat, maxLon, maxLat].
+        if (bbox[2] < bbox_min_lon or bbox[0] > bbox_max_lon or
+                bbox[3] < bbox_min_lat or bbox[1] > bbox_max_lat):
+            bbox_rejected += 1
+            continue
+        js_buildings.append([round(h_ft * 0.3048, 2), ring, bbox])
+    print(f"  Inside INITIAL_BBOX: {len(js_buildings)} "
+          f"(rejected {bbox_rejected})")
+
+    # Rebuild the building_data for folium's static building layer too,
+    # so the base layer matches the shadow-engine footprint set.
+    def _feat_in_bbox(f):
+        g = f.get("geometry") or {}
+        if g.get("type") != "Polygon":
+            return False
+        rings = g.get("coordinates") or []
+        if not rings or not rings[0]:
+            return False
+        xs = [pt[0] for pt in rings[0]]
+        ys = [pt[1] for pt in rings[0]]
+        fminx, fmaxx = min(xs), max(xs)
+        fminy, fmaxy = min(ys), max(ys)
+        return not (fmaxx < bbox_min_lon or fminx > bbox_max_lon
+                    or fmaxy < bbox_min_lat or fminy > bbox_max_lat)
+
+    building_data = {
+        "type": "FeatureCollection",
+        "features": [f for f in building_data["features"] if _feat_in_bbox(f)],
+    }
+    building_count = len(building_data["features"])
+    print(f"  Building layer features: {building_count}")
 
     print("Loading streetlights...")
-    coords = load_streetlights(scale_pct)
+    coords = [c for c in load_streetlights(scale_pct)
+              if _in_bbox_latlon(c[0], c[1])]
+    print(f"  Inside INITIAL_BBOX: {len(coords)} streetlights")
     print("Loading food establishments...")
-    places = load_food_establishments(scale_pct)
+    places = [p for p in load_food_establishments(scale_pct)
+              if _in_bbox_latlon(p["lat"], p["lon"])]
+    print(f"  Inside INITIAL_BBOX: {len(places)} food places")
 
-    m = _create_base_map("CartoDB positron")
+    # Pan bounds mirror the data cutoff so the user never sees an
+    # empty area where data was stripped.
+    m = _create_base_map(
+        "CartoDB positron",
+        min_lat=bbox_min_lat, max_lat=bbox_max_lat,
+        min_lon=bbox_min_lon, max_lon=bbox_max_lon,
+    )
     _add_building_layer(m, building_data)
 
     # Dark Matter tiles overlay, hidden by default. JS toggles on at night.
@@ -1129,6 +1191,17 @@ def build_time_slider_map(target_time, scale_pct):
       playing: false, playTimer: null, shadowLayer: null
     };
 
+    // CartoDB Positron and Dark Matter ship tiles only up to zoom 18.
+    // We expose zoom 20 so users can inspect building detail; letting
+    // Leaflet upscale the zoom-18 tile keeps the image visible (a bit
+    // soft) instead of going blank past 18.
+    map.eachLayer(function(l) {
+      if (l instanceof L.TileLayer) {
+        l.options.maxNativeZoom = 18;
+        l.options.maxZoom = 20;
+      }
+    });
+
     function parseDateStr(s) {
       var parts = s.split("-").map(Number);
       return { y: parts[0], m: parts[1] - 1, d: parts[2] };
@@ -1166,15 +1239,37 @@ def build_time_slider_map(target_time, scale_pct):
       return convexHull(pts);
     }
 
+    // Expand the current map viewport by MAX_SHADOW_LENGTH so we don't
+    // drop buildings whose shadow reaches into the visible area even
+    // though the footprint itself is just off-screen.
+    var SHADOW_LAT_MARGIN = MAX_SHADOW_LENGTH / M_PER_DEG_LAT;
+    var SHADOW_LON_MARGIN = MAX_SHADOW_LENGTH / M_PER_DEG_LON;
+
+    function cullBounds() {
+      var b = map.getBounds();
+      return [
+        b.getWest() - SHADOW_LON_MARGIN,
+        b.getSouth() - SHADOW_LAT_MARGIN,
+        b.getEast() + SHADOW_LON_MARGIN,
+        b.getNorth() + SHADOW_LAT_MARGIN
+      ];
+    }
+
     function renderShadows(altDeg, azDeg) {
       if (state.shadowLayer) {
         map.removeLayer(state.shadowLayer);
         state.shadowLayer = null;
       }
       if (altDeg <= 0) return;
+      var cb = cullBounds();
+      var cullW = cb[0], cullS = cb[1], cullE = cb[2], cullN = cb[3];
       var feats = [];
       for (var i = 0; i < BUILDINGS.length; i++) {
         var b = BUILDINGS[i];
+        var bb = b[2];
+        // Fast bbox reject: building entirely outside expanded viewport.
+        if (bb[2] < cullW || bb[0] > cullE ||
+            bb[3] < cullS || bb[1] > cullN) continue;
         var hull = projectShadow(b[1], b[0], altDeg, azDeg);
         if (!hull || hull.length < 3) continue;
         var ring = hull.slice();
@@ -1250,12 +1345,27 @@ def build_time_slider_map(target_time, scale_pct):
       ssLabel.textContent = pad(ss[0]) + ":" + pad(ss[1]);
     }
 
+    // Render pipeline: cheap light update runs synchronously on every
+    // input tick (time label, slider value). The heavy shadow render
+    // + theme swap is coalesced to at most one call per animation
+    // frame. During a slider drag this collapses dozens of input
+    // events into one render and keeps the UI thread unblocked.
+    var pendingRender = null;
+    function scheduleRender() {
+      if (pendingRender !== null) return;
+      pendingRender = requestAnimationFrame(function() {
+        pendingRender = null;
+        var s = sunAt(state.dateStr, state.slot);
+        renderTheme(s.alt > 0);
+        renderShadows(s.alt, s.az);
+      });
+    }
+
     function updateScene() {
       var s = sunAt(state.dateStr, state.slot);
       timeEl.textContent = pad(s.hour) + ":" + pad(s.min);
       rangeEl.value = state.slot;
-      renderTheme(s.alt > 0);
-      renderShadows(s.alt, s.az);
+      scheduleRender();
     }
 
     rangeEl.addEventListener("input", function() {
@@ -1269,6 +1379,10 @@ def build_time_slider_map(target_time, scale_pct):
       updateSunMarkers();
       updateScene();
     });
+
+    // Pan or zoom changes the viewport, so the culled shadow set must
+    // be recomputed. moveend fires once at the end of a gesture.
+    map.on("moveend", function() { scheduleRender(); });
 
     playEl.addEventListener("click", function() {
       if (state.playing) {
