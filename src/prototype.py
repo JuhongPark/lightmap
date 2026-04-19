@@ -77,8 +77,8 @@ CAMBRIDGE_BUILDINGS_PATH = os.path.join(
 BUILDINGS_DB_PATH = os.path.join(DATA_DIR, "buildings.db")
 
 HEATMAP_GRADIENT = {
-    0.2: "#1e3a5f", 0.4: "#2563eb", 0.6: "#60a5fa",
-    0.8: "#fbbf24", 1.0: "#ffffff",
+    0.2: "#78350f", 0.4: "#d97706", 0.6: "#fbbf24",
+    0.8: "#fde68a", 1.0: "#ffffff",
 }
 TIME_STEPS = [7, 9, 11, 13, 15, 17]
 
@@ -363,8 +363,8 @@ def _load_buildings_and_shadows(scale_pct, target_time):
 
 def _create_base_map(
     tiles="CartoDB positron", *, prefer_canvas=True,
-    min_lat=42.310, max_lat=42.395,
-    min_lon=-71.225, max_lon=-70.995,
+    min_lat=INITIAL_BBOX[0], max_lat=INITIAL_BBOX[2],
+    min_lon=INITIAL_BBOX[1], max_lon=INITIAL_BBOX[3],
 ):
     # prefer_canvas=True switches Leaflet to Canvas rendering instead of
     # SVG. SVG is fine for hundreds of polygons but chokes on the 123K
@@ -372,11 +372,9 @@ def _create_base_map(
     # a DOM node. Canvas draws them into a single <canvas> element, so
     # the browser handles the map smoothly even at the full city scale.
     #
-    # The default pan bounds cover Harvard/Somerville in the north down
-    # to South Boston/Dorchester in the south. Callers that only ship
-    # data for a narrower region (e.g. time-slider with INITIAL_BBOX
-    # cutoff) should pass tighter min/max lat/lon so the viewport
-    # matches the data.
+    # Default pan bounds are INITIAL_BBOX (MIT + central Cambridge + the
+    # Boston core) so day and night renderers share the same frame. A
+    # caller can still pass wider bounds if a specific view needs them.
     m = folium.Map(
         location=MAP_CENTER, zoom_start=16, tiles=tiles,
         width="100%", height="100%",
@@ -440,10 +438,13 @@ def _add_food_layer(m, places):
         )
         folium.CircleMarker(
             location=[p["lat"], p["lon"]],
-            radius=3,
-            color="#fbbf24",
+            radius=5,
+            color="#fde68a",
+            weight=2,
+            opacity=0.55,
             fill=True,
-            fill_opacity=0.8,
+            fill_color="#fbbf24",
+            fill_opacity=0.9,
             popup=folium.Popup(popup_html, max_width=200),
         ).add_to(food_group)
     food_group.add_to(m)
@@ -593,7 +594,7 @@ def build_night_map(target_time, altitude, azimuth, scale_pct):
     _add_ui_plugins(m, theme="dark")
 
     brightness_legend = cm.LinearColormap(
-        colors=["#1e3a5f", "#2563eb", "#60a5fa", "#fbbf24", "#ffffff"],
+        colors=["#78350f", "#d97706", "#fbbf24", "#fde68a", "#ffffff"],
         vmin=0, vmax=1,
         caption="Light intensity (streetlight density)",
     )
@@ -826,13 +827,7 @@ def build_time_slider_map(target_time, scale_pct):
               if _in_bbox_latlon(p["lat"], p["lon"])]
     print(f"  Inside INITIAL_BBOX: {len(places)} food places")
 
-    # Pan bounds mirror the data cutoff so the user never sees an
-    # empty area where data was stripped.
-    m = _create_base_map(
-        "CartoDB positron",
-        min_lat=bbox_min_lat, max_lat=bbox_max_lat,
-        min_lon=bbox_min_lon, max_lon=bbox_max_lon,
-    )
+    m = _create_base_map("CartoDB positron")
     _add_building_layer(m, building_data)
 
     # Dark Matter tiles overlay, hidden by default. JS toggles on at night.
@@ -862,7 +857,9 @@ def build_time_slider_map(target_time, scale_pct):
         )
         folium.CircleMarker(
             location=[p["lat"], p["lon"]],
-            radius=3, color="#fbbf24", fill=True, fill_opacity=0.8,
+            radius=5,
+            color="#fde68a", weight=2, opacity=0.55,
+            fill=True, fill_color="#fbbf24", fill_opacity=0.9,
             popup=folium.Popup(popup_html, max_width=200),
         ).add_to(food_group)
     food_group.add_to(m)
@@ -1109,6 +1106,19 @@ def build_time_slider_map(target_time, scale_pct):
   var M_PER_DEG_LAT = 111320;
   var M_PER_DEG_LON = 111320 * Math.cos(LAT_CENTER * Math.PI / 180);
   var MAX_SHADOW_LENGTH = 500;
+  // Dawn/dusk transition.
+  //   altitude <= TWILIGHT_START : full dark (night theme locked in)
+  //   TWILIGHT_START .. DAY_THRESHOLD : dark basemap fades out linearly
+  //   altitude >= DAY_THRESHOLD : full day. Shadows appear from here.
+  // Below DAY_THRESHOLD every building would project 200 m+ shadows
+  // (cap is 500 m) and they merge into a city-wide "shadow wall".
+  // Pinning the shadow gate at 15 deg altitude keeps the evening
+  // transition smooth — around 18:00 in Boston summer the sun drops
+  // below 15 deg, shadows switch off, and the scene gradually darkens
+  // into night. Sunrise/sunset slider markers still track the true
+  // altitude-0 moments.
+  var TWILIGHT_START = 0;
+  var DAY_THRESHOLD = 15;
 
   function pad(n) { return n < 10 ? "0" + n : "" + n; }
   function d2r(d) { return d * Math.PI / 180; }
@@ -1189,7 +1199,8 @@ def build_time_slider_map(target_time, scale_pct):
 
     var state = {
       dateStr: INITIAL_DATE, slot: parseInt(rangeEl.value, 10),
-      playing: false, playTimer: null, shadowLayer: null
+      playing: false, playTimer: null, shadowLayer: null,
+      hadShadows: false
     };
 
     function parseDateStr(s) {
@@ -1245,19 +1256,41 @@ def build_time_slider_map(target_time, scale_pct):
       ];
     }
 
-    function renderShadows(altDeg, azDeg) {
-      if (state.shadowLayer) {
-        map.removeLayer(state.shadowLayer);
-        state.shadowLayer = null;
-      }
-      if (altDeg <= 0) return;
+    // Single canvas-backed shadow layer, constructed once. Each tick
+    // we clear + refill it via addData, which avoids the per-tick
+    // Leaflet bookkeeping of removing and re-registering a fresh
+    // L.GeoJSON from scratch. The explicit canvas renderer keeps the
+    // render path off SVG even when the map's preferCanvas default is
+    // shadowed by plugin layers.
+    var shadowCanvas = L.canvas({ padding: 0.5 });
+    var shadowStyle = function(f) {
+      var h = f.properties.h;
+      var op = Math.min(0.18 + (h / 60) * 0.22, 0.45);
+      return {
+        fillColor: "#0f172a", color: "#0f172a",
+        weight: 0.2, fillOpacity: op, opacity: op
+      };
+    };
+    state.shadowLayer = L.geoJson(null, {
+      interactive: false,
+      renderer: shadowCanvas,
+      style: shadowStyle
+    }).addTo(map);
+
+    // Per-slot feature cache. Key = "YYYY-MM-DD:slot". Populated lazily
+    // on first visit to a slot; subsequent visits skip the convex-hull
+    // loop entirely. Viewport changes invalidate the whole cache at
+    // moveend because the culled building set differs.
+    var shadowCache = new Map();
+    var CACHE_LIMIT = 48;
+
+    function computeShadowFeats(altDeg, azDeg) {
       var cb = cullBounds();
       var cullW = cb[0], cullS = cb[1], cullE = cb[2], cullN = cb[3];
       var feats = [];
       for (var i = 0; i < BUILDINGS.length; i++) {
         var b = BUILDINGS[i];
         var bb = b[2];
-        // Fast bbox reject: building entirely outside expanded viewport.
         if (bb[2] < cullW || bb[0] > cullE ||
             bb[3] < cullS || bb[1] > cullN) continue;
         var hull = projectShadow(b[1], b[0], altDeg, azDeg);
@@ -1270,35 +1303,76 @@ def build_time_slider_map(target_time, scale_pct):
           properties: { h: b[0] }
         });
       }
-      state.shadowLayer = L.geoJson(
-        { type: "FeatureCollection", features: feats },
-        {
-          interactive: false,
-          style: function(f) {
-            var h = f.properties.h;
-            var op = Math.min(0.18 + (h / 60) * 0.22, 0.45);
-            return {
-              fillColor: "#0f172a", color: "#0f172a",
-              weight: 0.2, fillOpacity: op, opacity: op
-            };
-          }
-        }
-      ).addTo(map);
+      return feats;
     }
 
-    function renderTheme(isDay) {
-      if (isDay) {
-        host.classList.remove("night");
-        iconEl.textContent = "\u2600";
+    function renderShadows(altDeg, azDeg) {
+      // Keep shadows off until the sun is DAY_THRESHOLD above the
+      // horizon. Below that angle shadow_length = height / tan(alt)
+      // explodes and every building hits the 500 m cap, flooding the
+      // view with a uniform shadow wall.
+      if (altDeg < DAY_THRESHOLD) {
+        if (state.hadShadows) {
+          state.shadowLayer.clearLayers();
+          state.hadShadows = false;
+        }
+        return;
+      }
+      state.shadowLayer.clearLayers();
+      state.hadShadows = true;
+      var key = state.dateStr + ":" + state.slot;
+      var feats;
+      if (shadowCache.has(key)) {
+        feats = shadowCache.get(key);
+        // LRU bump.
+        shadowCache.delete(key);
+        shadowCache.set(key, feats);
+      } else {
+        feats = computeShadowFeats(altDeg, azDeg);
+        if (shadowCache.size >= CACHE_LIMIT) {
+          var firstKey = shadowCache.keys().next().value;
+          shadowCache.delete(firstKey);
+        }
+        shadowCache.set(key, feats);
+      }
+      state.shadowLayer.addData({
+        type: "FeatureCollection", features: feats
+      });
+    }
+
+    function renderTheme(altDeg) {
+      // nightMix goes 1 -> 0 smoothly as the sun climbs from
+      // TWILIGHT_START to DAY_THRESHOLD. Below TWILIGHT_START the sky
+      // is solid night; above DAY_THRESHOLD the day basemap stands on
+      // its own. The dark tile fades by opacity so the scene brightens
+      // gradually. Streetlights + food stay on through the transition
+      // and clear out at DAY_THRESHOLD.
+      var nightMix;
+      if (altDeg <= TWILIGHT_START) nightMix = 1;
+      else if (altDeg >= DAY_THRESHOLD) nightMix = 0;
+      else nightMix = 1 - (altDeg - TWILIGHT_START) /
+                          (DAY_THRESHOLD - TWILIGHT_START);
+
+      if (nightMix > 0) {
+        if (!map.hasLayer(dark)) dark.addTo(map);
+        dark.setOpacity(nightMix);
+        if (!map.hasLayer(lights)) lights.addTo(map);
+        if (!map.hasLayer(food)) food.addTo(map);
+      } else {
         if (map.hasLayer(dark)) map.removeLayer(dark);
         if (map.hasLayer(lights)) map.removeLayer(lights);
         if (map.hasLayer(food)) map.removeLayer(food);
-      } else {
+      }
+
+      // Slider chrome flips on dominant mix. The 0.5 crossover lines
+      // up with altitude -0.5 (roughly true sunrise/sunset) so the
+      // slider color aligns with the marker position.
+      if (nightMix > 0.5) {
         host.classList.add("night");
         iconEl.textContent = "\u263E";
-        if (!map.hasLayer(dark)) dark.addTo(map);
-        if (!map.hasLayer(lights)) lights.addTo(map);
-        if (!map.hasLayer(food)) food.addTo(map);
+      } else {
+        host.classList.remove("night");
+        iconEl.textContent = "\u2600";
       }
     }
 
@@ -1346,7 +1420,7 @@ def build_time_slider_map(target_time, scale_pct):
       pendingRender = requestAnimationFrame(function() {
         pendingRender = null;
         var s = sunAt(state.dateStr, state.slot);
-        renderTheme(s.alt > 0);
+        renderTheme(s.alt);
         renderShadows(s.alt, s.az);
       });
     }
@@ -1366,13 +1440,19 @@ def build_time_slider_map(target_time, scale_pct):
     dateEl.addEventListener("change", function() {
       if (!dateEl.value) return;
       state.dateStr = dateEl.value;
+      // Same slot on a different date has a different sun angle, so
+      // cached features are invalid.
+      shadowCache.clear();
       updateSunMarkers();
       updateScene();
     });
 
     // Pan or zoom changes the viewport, so the culled shadow set must
     // be recomputed. moveend fires once at the end of a gesture.
-    map.on("moveend", function() { scheduleRender(); });
+    map.on("moveend", function() {
+      shadowCache.clear();
+      scheduleRender();
+    });
 
     playEl.addEventListener("click", function() {
       if (state.playing) {
