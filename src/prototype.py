@@ -1663,7 +1663,100 @@ def build_time_slider_map(target_time, scale_pct):
       poiCache.clear();
       updateSunMarkers();
       updateScene();
+      fetchWeather(state.dateStr);
     });
+
+    // Weather (Open-Meteo). Free, no auth, covers forecast
+    // (near-future + today) and archive (historical). Writes
+    // temp range and max UV into #lm-weather. Cached per date.
+    var weatherEl = document.getElementById("lm-weather");
+    var weatherCache = new Map();
+    // WMO weather codes mapped to BMP-only icons so everything
+    // renders without emoji-font support and without surrogate-pair
+    // escape gymnastics. Good-enough fidelity: sun / partial / cloud /
+    // fog / umbrella for rain / snowflake / thundercloud.
+    var weatherCodeIcon = {
+      0: "\u2600",                             // clear
+      1: "\u26C5", 2: "\u26C5", 3: "\u2601",   // few clouds to overcast
+      45: "\u2601", 48: "\u2601",              // fog -> cloud
+      51: "\u2602", 53: "\u2602", 55: "\u2602",
+      56: "\u2602", 57: "\u2602",
+      61: "\u2602", 63: "\u2602", 65: "\u2602",
+      66: "\u2602", 67: "\u2602",
+      71: "\u2744", 73: "\u2744", 75: "\u2744", 77: "\u2744",
+      80: "\u2602", 81: "\u2602", 82: "\u2602",
+      85: "\u2744", 86: "\u2744",
+      95: "\u26C8", 96: "\u26C8", 99: "\u26C8"
+    };
+    function weatherIcon(code) {
+      return weatherCodeIcon[code] || "\u2601";
+    }
+
+    function fetchWeather(dateStr) {
+      if (!weatherEl) return;
+      if (weatherCache.has(dateStr)) {
+        renderWeather(weatherCache.get(dateStr));
+        return;
+      }
+      // Pick archive vs forecast. Forecast serves today + 16 days out
+      // and has a short ingest lag for very recent past. Archive
+      // serves reliable history back to 1940 but is a day or two
+      // behind the present.
+      var today = new Date();
+      today.setHours(0, 0, 0, 0);
+      var picked = new Date(dateStr + "T12:00:00");
+      picked.setHours(0, 0, 0, 0);
+      var daysFromToday = (picked - today) / 86400000;
+      var useArchive = daysFromToday < -7;
+      var base = useArchive
+        ? "https://archive-api.open-meteo.com/v1/archive"
+        : "https://api.open-meteo.com/v1/forecast";
+      var url = base
+        + "?latitude=" + LAT_CENTER
+        + "&longitude=" + LON_CENTER
+        + "&daily=temperature_2m_max,temperature_2m_min,"
+        + "uv_index_max,weather_code"
+        + "&temperature_unit=fahrenheit"
+        + "&timezone=America%2FNew_York"
+        + "&start_date=" + dateStr + "&end_date=" + dateStr;
+      weatherEl.textContent = "Loading weather...";
+      fetch(url)
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(j) {
+          if (!j || !j.daily) {
+            weatherEl.textContent = "Weather unavailable";
+            return;
+          }
+          var d = j.daily;
+          var info = {
+            tmax: d.temperature_2m_max && d.temperature_2m_max[0],
+            tmin: d.temperature_2m_min && d.temperature_2m_min[0],
+            uv:   d.uv_index_max && d.uv_index_max[0],
+            code: d.weather_code && d.weather_code[0]
+          };
+          weatherCache.set(dateStr, info);
+          renderWeather(info);
+        })
+        .catch(function() {
+          weatherEl.textContent = "Weather unavailable";
+        });
+    }
+
+    function renderWeather(w) {
+      if (!weatherEl) return;
+      if (w.tmax == null) {
+        weatherEl.textContent = "Weather unavailable";
+        return;
+      }
+      var icon = weatherIcon(w.code);
+      var txt = icon + "  "
+        + Math.round(w.tmin) + "\u2013"
+        + Math.round(w.tmax) + "\u00B0F  \u00B7  UV "
+        + (w.uv == null ? "?" : Math.round(w.uv));
+      weatherEl.textContent = txt;
+    }
+
+    fetchWeather(state.dateStr);
 
     // Pan or zoom changes the viewport, so the culled shadow set must
     // be recomputed. moveend fires once at the end of a gesture.
@@ -1723,8 +1816,10 @@ def build_time_slider_map(target_time, scale_pct):
     _add_info_panel(m, [
         "<b>LightMap</b> &mdash; Time Slider",
         f'<span style="color:#64748b;">{date_str}</span>',
-        f"{building_count:,} buildings &middot; {len(osm_pois):,} "
-        "venues (OSM opening_hours)",
+        f"{building_count:,} buildings &middot; {trees_added:,} "
+        "tree canopies &middot; {:,} venues".format(len(osm_pois)),
+        '<span id="lm-weather" style="color:#64748b; font-size:11px;">'
+        "Loading weather...</span>",
         '<span style="color:#64748b; font-size:11px;">'
         "Drag time or pick a date. Venues toggle on/off by their "
         "real opening hours.</span>",

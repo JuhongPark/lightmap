@@ -51,6 +51,7 @@ The shadow engine computes sun position (pvlib) and projects each building footp
 | Boston food establishments (active licenses) | 3K | [data.boston.gov CKAN](https://data.boston.gov/dataset/active-food-establishment-licenses) | Standalone night map markers |
 | **OSM amenity POIs (with `opening_hours`)** | 760 inside viewport | [OpenStreetMap via Overpass API](https://overpass-turbo.eu/) | Time-slider time-aware venue markers |
 | **Cambridge tree canopy (2018)** | ~11K polygons inside viewport | [Cambridge GIS](https://github.com/cambridgegis/cambridgegis_data_environmental) | Tree shade in the time-slider shadow engine. Each polygon is treated as a 10 m canopy and casts a shadow along the same sun angle as buildings. Boston's BPDA canopy (EPSG:2249, 1 GB shapefile) is a follow-up. |
+| **Weather + UV (Open-Meteo)** | 1 daily record per slider date | [Open-Meteo API](https://open-meteo.com/) | Info panel temperature range + max UV for the slider's currently selected date. Free and no auth. Fetched live from the browser: forecast API for today-to-future-16-days, archive API for historical dates. |
 
 ### Time-slider data scope
 
