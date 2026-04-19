@@ -99,11 +99,11 @@ This downloads:
 
 | File | Size | Source |
 | --- | --- | --- |
-| `data/buildings/boston_buildings.geojson` | 141 MB | BPDA |
+| `data/buildings/boston_buildings.geojson` | 147 MB | BPDA |
 | `data/cambridge/buildings/buildings.geojson` | 19 MB | Cambridge GIS |
-| `data/streetlights/streetlights.csv` | 2 MB | data.boston.gov CKAN |
-| `data/cambridge/streetlights/streetlights.geojson` | small | Cambridge GIS |
-| `data/safety/food_establishments.csv` | 200 KB | data.boston.gov CKAN |
+| `data/streetlights/streetlights.csv` | 2.2 MB | data.boston.gov CKAN |
+| `data/cambridge/streetlights/streetlights.geojson` | 2.7 MB | Cambridge GIS |
+| `data/safety/food_establishments.csv` | 180 KB | data.boston.gov CKAN |
 
 The time-slider adds one more dataset. Pull it with a separate script so the Overpass API is hit only when needed:
 
