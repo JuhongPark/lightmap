@@ -52,6 +52,8 @@ The shadow engine computes sun position (pvlib) and projects each building footp
 | **OSM amenity POIs (with `opening_hours`)** | 760 inside viewport | [OpenStreetMap via Overpass API](https://overpass-turbo.eu/) | Time-slider time-aware venue markers |
 | **Cambridge tree canopy (2018)** | ~11K polygons inside viewport | [Cambridge GIS](https://github.com/cambridgegis/cambridgegis_data_environmental) | Tree shade in the time-slider shadow engine. Each polygon is treated as a 10 m canopy and casts a shadow along the same sun angle as buildings. Boston's BPDA canopy (EPSG:2249, 1 GB shapefile) is a follow-up. |
 | **Weather + UV (Open-Meteo)** | 1 daily record per slider date | [Open-Meteo API](https://open-meteo.com/) | Info panel temperature range + max UV for the slider's currently selected date. Free and no auth. Fetched live from the browser: forecast API for today-to-future-16-days, archive API for historical dates. |
+| **Boston crime incidents (last 2 years, night hours)** | ~19K inside viewport | [data.boston.gov CKAN](https://data.boston.gov/dataset/crime-incident-reports-august-2015-to-date-source-new-system) | Night-only safety heatmap. Aggregated, not live. Filtered to hours 18-05 so the map shows the pattern people actually encounter when walking home. |
+| **Boston crash records (Vision Zero, last 2 years)** | ~1.6K inside viewport | [data.boston.gov CKAN](https://data.boston.gov/dataset/vision-zero-crash-records) | Orange pins on the night layer. Click to see crash mode (mv / ped / bike). |
 
 ### Time-slider data scope
 
@@ -106,17 +108,20 @@ This downloads:
 | `data/cambridge/streetlights/streetlights.geojson` | 2.7 MB | Cambridge GIS |
 | `data/safety/food_establishments.csv` | 180 KB | data.boston.gov CKAN |
 
-The time-slider adds two more datasets. Pull them with separate scripts so the external APIs are hit only when needed:
+The time-slider adds three more datasets. Pull them with separate scripts so the external APIs are hit only when needed:
 
 ```
 .venv/bin/python scripts/download_osm_pois.py
 .venv/bin/python scripts/download_trees.py
+.venv/bin/python scripts/download_safety.py
 ```
 
 | File | Size | Source |
 | --- | --- | --- |
 | `data/osm/pois.geojson` | ~150 KB | OpenStreetMap via Overpass API |
 | `data/trees/trees.geojson` | ~3.5 MB | Cambridge GIS (TopoJSON → GeoJSON, simplified to ~2 m tolerance) |
+| `data/safety/crime.geojson` | ~3 MB | Boston data.boston.gov CKAN (last 2 years, night hours, INITIAL_BBOX filtered) |
+| `data/safety/crashes.geojson` | ~220 KB | Boston data.boston.gov CKAN (last 2 years, INITIAL_BBOX filtered) |
 
 ### 3. Pre-process buildings into SQLite
 

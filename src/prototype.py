@@ -77,6 +77,8 @@ CAMBRIDGE_BUILDINGS_PATH = os.path.join(
 BUILDINGS_DB_PATH = os.path.join(DATA_DIR, "buildings.db")
 OSM_POIS_PATH = os.path.join(DATA_DIR, "osm", "pois.geojson")
 TREES_PATH = os.path.join(DATA_DIR, "trees", "trees.geojson")
+CRIME_PATH = os.path.join(DATA_DIR, "safety", "crime.geojson")
+CRASH_PATH = os.path.join(DATA_DIR, "safety", "crashes.geojson")
 
 HEATMAP_GRADIENT = {
     0.2: "#78350f", 0.4: "#d97706", 0.6: "#fbbf24",
@@ -281,6 +283,48 @@ def load_streetlights(scale_pct):
 
     print(f"  Total streetlights: {len(coords)}")
     return coords
+
+
+def load_safety_crime():
+    """Load night-hour crime incidents as [[lat, lon], ...] for a
+    Leaflet heatmap. Each point is a recorded incident during hours
+    18-05 within INITIAL_BBOX over the past two years."""
+    if not os.path.exists(CRIME_PATH):
+        print(f"  Crime file not found: {CRIME_PATH}")
+        print(f"  Run scripts/download_safety.py to populate it")
+        return []
+    with open(CRIME_PATH) as f:
+        gj = json.load(f)
+    out = []
+    for feat in gj.get("features", []):
+        coords = feat.get("geometry", {}).get("coordinates") or []
+        if len(coords) < 2:
+            continue
+        out.append([coords[1], coords[0]])  # [lat, lon] for HeatMap
+    print(f"  Crime points: {len(out)}")
+    return out
+
+
+def load_safety_crashes():
+    """Load Boston crash records (Vision Zero) as list of dicts with
+    lat/lon/mode."""
+    if not os.path.exists(CRASH_PATH):
+        print(f"  Crashes file not found: {CRASH_PATH}")
+        return []
+    with open(CRASH_PATH) as f:
+        gj = json.load(f)
+    out = []
+    for feat in gj.get("features", []):
+        coords = feat.get("geometry", {}).get("coordinates") or []
+        if len(coords) < 2:
+            continue
+        props = feat.get("properties") or {}
+        out.append({
+            "lat": coords[1], "lon": coords[0],
+            "mode": props.get("mode") or "",
+        })
+    print(f"  Crash records: {len(out)}")
+    return out
 
 
 def load_trees():
@@ -947,6 +991,14 @@ def build_time_slider_map(target_time, scale_pct):
                 if _in_bbox_latlon(p["lat"], p["lon"])]
     print(f"  Inside INITIAL_BBOX: {len(osm_pois)} POIs")
 
+    print("Loading safety data...")
+    crime_points = [c for c in load_safety_crime()
+                    if _in_bbox_latlon(c[0], c[1])]
+    print(f"  Inside INITIAL_BBOX: {len(crime_points)} crime points")
+    crashes = [c for c in load_safety_crashes()
+               if _in_bbox_latlon(c["lat"], c["lon"])]
+    print(f"  Inside INITIAL_BBOX: {len(crashes)} crash records")
+
     m = _create_base_map("CartoDB positron")
     _add_building_layer(m, building_data)
 
@@ -973,6 +1025,40 @@ def build_time_slider_map(target_time, scale_pct):
             coords, radius=12, blur=20, gradient=HEATMAP_GRADIENT,
         ).add_to(streetlight_group)
     streetlight_group.add_to(m)
+
+    # Safety context: nighttime crime heatmap + recent crash pins.
+    # Historic aggregates covering the last two years. Visible only
+    # when nightMix > 0.5 (same gate as OSM venue markers) so they do
+    # not clutter the day shadow view.
+    crime_group = folium.FeatureGroup(
+        name="Crime (2yr, night hrs)", show=False, control=False,
+    )
+    if crime_points:
+        HeatMap(
+            crime_points, radius=14, blur=22, max_zoom=18,
+            gradient={
+                0.2: "#450a0a", 0.5: "#b91c1c",
+                0.8: "#ef4444", 1.0: "#fca5a5",
+            },
+        ).add_to(crime_group)
+    crime_group.add_to(m)
+
+    crash_group = folium.FeatureGroup(
+        name="Crashes (2yr)", show=False, control=False,
+    )
+    for c in crashes:
+        popup_html = (
+            '<div style="font-family:sans-serif; font-size:12px;">'
+            f'<b>Crash</b><br>{c["mode"]}</div>'
+        )
+        folium.CircleMarker(
+            location=[c["lat"], c["lon"]],
+            radius=3,
+            color="#fb923c", weight=1.2, opacity=0.6,
+            fill=True, fill_color="#f59e0b", fill_opacity=0.75,
+            popup=folium.Popup(popup_html, max_width=160),
+        ).add_to(crash_group)
+    crash_group.add_to(m)
 
     _add_ui_plugins(m, theme="light")
     legend = _make_shadow_cmap()
@@ -1297,6 +1383,8 @@ def build_time_slider_map(target_time, scale_pct):
     var map = __MAP_NAME__;
     var dark = __DARK_NAME__;
     var lights = __STREET_NAME__;
+    var crime = __CRIME_NAME__;
+    var crash = __CRASH_NAME__;
     var host = document.getElementById("lm-slider-host");
     var rangeEl = document.getElementById("lm-range");
     var dateEl = document.getElementById("lm-date");
@@ -1581,12 +1669,20 @@ def build_time_slider_map(target_time, scale_pct):
       // Slider chrome flips on dominant mix. The 0.5 crossover lines
       // up with altitude -0.5 (roughly true sunrise/sunset) so the
       // slider color aligns with the marker position.
+      //
+      // Same gate drives the night-only "safety context" overlays
+      // (crime heatmap + recent crash pins) so they appear and
+      // disappear together with the slider's moon icon.
       if (nightMix > 0.5) {
         host.classList.add("night");
         iconEl.textContent = "\u263E";
+        if (!map.hasLayer(crime)) crime.addTo(map);
+        if (!map.hasLayer(crash)) crash.addTo(map);
       } else {
         host.classList.remove("night");
         iconEl.textContent = "\u2600";
+        if (map.hasLayer(crime)) map.removeLayer(crime);
+        if (map.hasLayer(crash)) map.removeLayer(crash);
       }
     }
 
@@ -1801,6 +1897,8 @@ def build_time_slider_map(target_time, scale_pct):
         .replace("__MAP_NAME__", m.get_name())
         .replace("__DARK_NAME__", dark_tiles.get_name())
         .replace("__STREET_NAME__", streetlight_group.get_name())
+        .replace("__CRIME_NAME__", crime_group.get_name())
+        .replace("__CRASH_NAME__", crash_group.get_name())
         .replace("__INITIAL_DATE__", target_time.strftime("%Y-%m-%d"))
         .replace("__CENTER_LAT__", str(MAP_CENTER[0]))
         .replace("__CENTER_LON__", str(MAP_CENTER[1])))
@@ -1817,7 +1915,10 @@ def build_time_slider_map(target_time, scale_pct):
         "<b>LightMap</b> &mdash; Time Slider",
         f'<span style="color:#64748b;">{date_str}</span>',
         f"{building_count:,} buildings &middot; {trees_added:,} "
-        "tree canopies &middot; {:,} venues".format(len(osm_pois)),
+        "trees &middot; {:,} venues".format(len(osm_pois)),
+        f'<span style="color:#94a3b8; font-size:11px;">Night safety: '
+        f'{len(crime_points):,} incidents + {len(crashes):,} crashes '
+        f'(2yr)</span>',
         '<span id="lm-weather" style="color:#64748b; font-size:11px;">'
         "Loading weather...</span>",
         '<span style="color:#64748b; font-size:11px;">'
