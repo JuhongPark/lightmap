@@ -42,11 +42,31 @@ The shadow engine computes sun position (pvlib) and projects each building footp
 
 ## Data Sources
 
-| Dataset | Records | Source |
-| --- | --- | --- |
-| Buildings | 123K (with height) | BPDA + Cambridge GIS |
-| Streetlights | 80K | data.boston.gov + Cambridge GIS |
-| Tree canopy | 144K | Boston + Cambridge GIS |
+| Dataset | Records | Source | Used for |
+| --- | --- | --- | --- |
+| Boston buildings (with height) | 105K with height | [BPDA](https://data.boston.gov/dataset/boston-buildings-with-roof-breaks) (2010 survey) | Shadow projection |
+| Cambridge buildings (with height) | 18K | [Cambridge GIS](https://github.com/cambridgegis/cambridgegis_data) (2018 data) | Shadow projection |
+| Boston streetlights | 74K | [data.boston.gov CKAN](https://data.boston.gov/dataset/streetlight-locations) | Brightness heatmap |
+| Cambridge streetlights | 6K | [Cambridge GIS](https://github.com/cambridgegis/cambridgegis_data_infra) | Brightness heatmap |
+| Boston food establishments (active licenses) | 3K | [data.boston.gov CKAN](https://data.boston.gov/dataset/active-food-establishment-licenses) | Standalone night map markers |
+| **OSM amenity POIs (with `opening_hours`)** | 760 inside viewport | [OpenStreetMap via Overpass API](https://overpass-turbo.eu/) | Time-slider time-aware venue markers |
+| Tree canopy | 244K polygons | Boston + Cambridge GIS | (Planned, not yet rendered) |
+
+### Time-slider data scope
+
+The interactive time slider embeds only the Boston + Cambridge core (a bbox roughly covering MIT, central Cambridge, Back Bay, and downtown Boston). Data outside this bbox is not loaded — this keeps the shipped HTML under 20 MB and the browser scrub responsive. See `src/render/strategies.py` `INITIAL_BBOX` for the exact coordinates.
+
+### How OpenStreetMap powers the venue time-gating
+
+Boston's public licensing dataset does not publish business operating hours — it only lists active licenses. To show which venues are actually open at a given time, the time-slider pulls amenity POIs (restaurant, bar, cafe, fast_food, pub, nightclub) from **OpenStreetMap** via the free, no-auth Overpass API and keeps only those carrying an `opening_hours` tag (about 50% of POIs in the target area). The browser parses that tag with [`opening_hours.js`](https://openingh.openstreetmap.de/) and shows each marker only when the slider's (date, time) is inside the venue's advertised hours.
+
+**Snapshot caveat.** The OSM data is a single snapshot fetched at build time, not a live feed. It encodes the **current** advertised weekly pattern for each venue. When you scrub the slider to a past date, the weekday-pattern logic still applies correctly (Monday-at-08:00 a cafe whose tag is "Mo-Fr 07:00-15:00" shows open), but **specific historical events are not reflected**. For example:
+
+- A restaurant that closed permanently last year is gone from the snapshot. It will not appear even if you pick a date when it was actually open.
+- A venue that changed its hours in 2024 will show its post-2024 hours for every date, including dates before the change.
+- Historical public-holiday closures in specific years are not captured unless the tag literally encodes them (rare in practice).
+
+Rerun `scripts/download_osm_pois.py` to refresh the snapshot.
 
 See [planning/data-catalog.md](planning/data-catalog.md) for the full data catalog.
 
@@ -84,6 +104,16 @@ This downloads:
 | `data/streetlights/streetlights.csv` | 2 MB | data.boston.gov CKAN |
 | `data/cambridge/streetlights/streetlights.geojson` | small | Cambridge GIS |
 | `data/safety/food_establishments.csv` | 200 KB | data.boston.gov CKAN |
+
+The time-slider adds one more dataset. Pull it with a separate script so the Overpass API is hit only when needed:
+
+```
+.venv/bin/python scripts/download_osm_pois.py
+```
+
+| File | Size | Source |
+| --- | --- | --- |
+| `data/osm/pois.geojson` | ~150 KB | OpenStreetMap via Overpass API |
 
 ### 3. Pre-process buildings into SQLite
 

@@ -75,6 +75,7 @@ CAMBRIDGE_BUILDINGS_PATH = os.path.join(
     DATA_DIR, "cambridge", "buildings", "buildings.geojson"
 )
 BUILDINGS_DB_PATH = os.path.join(DATA_DIR, "buildings.db")
+OSM_POIS_PATH = os.path.join(DATA_DIR, "osm", "pois.geojson")
 
 HEATMAP_GRADIENT = {
     0.2: "#78350f", 0.4: "#d97706", 0.6: "#fbbf24",
@@ -279,6 +280,40 @@ def load_streetlights(scale_pct):
 
     print(f"  Total streetlights: {len(coords)}")
     return coords
+
+
+def load_osm_pois():
+    """Load OSM amenity POIs that carry an opening_hours tag.
+
+    These are the venues the time-slider can actually toggle on/off per
+    (date, time). The download script (scripts/download_osm_pois.py)
+    fetches them from the Overpass API and writes the GeoJSON. If the
+    file is missing, the time-slider will silently degrade (no POI
+    markers), so the user gets a clear hint to run the download step.
+    """
+    if not os.path.exists(OSM_POIS_PATH):
+        print(f"  OSM POIs file not found: {OSM_POIS_PATH}")
+        print(f"  Run scripts/download_osm_pois.py to populate it")
+        return []
+    with open(OSM_POIS_PATH) as f:
+        gj = json.load(f)
+    out = []
+    for feat in gj.get("features", []):
+        coords = feat.get("geometry", {}).get("coordinates") or []
+        if len(coords) < 2:
+            continue
+        props = feat.get("properties", {})
+        hours = props.get("opening_hours")
+        if not hours:
+            continue
+        out.append({
+            "lon": coords[0], "lat": coords[1],
+            "name": props.get("name", ""),
+            "amenity": props.get("amenity", ""),
+            "hours": hours,
+        })
+    print(f"  OSM POIs with opening_hours: {len(out)}")
+    return out
 
 
 def load_food_establishments(scale_pct):
@@ -822,10 +857,10 @@ def build_time_slider_map(target_time, scale_pct):
     coords = [c for c in load_streetlights(scale_pct)
               if _in_bbox_latlon(c[0], c[1])]
     print(f"  Inside INITIAL_BBOX: {len(coords)} streetlights")
-    print("Loading food establishments...")
-    places = [p for p in load_food_establishments(scale_pct)
-              if _in_bbox_latlon(p["lat"], p["lon"])]
-    print(f"  Inside INITIAL_BBOX: {len(places)} food places")
+    print("Loading OSM POIs (opening_hours)...")
+    osm_pois = [p for p in load_osm_pois()
+                if _in_bbox_latlon(p["lat"], p["lon"])]
+    print(f"  Inside INITIAL_BBOX: {len(osm_pois)} POIs")
 
     m = _create_base_map("CartoDB positron")
     _add_building_layer(m, building_data)
@@ -845,24 +880,6 @@ def build_time_slider_map(target_time, scale_pct):
             coords, radius=12, blur=20, gradient=HEATMAP_GRADIENT,
         ).add_to(streetlight_group)
     streetlight_group.add_to(m)
-
-    food_group = folium.FeatureGroup(
-        name="Food Establishments", show=False, control=False,
-    )
-    for p in places:
-        popup_html = (
-            '<div style="font-family:sans-serif; font-size:12px;'
-            ' min-width:120px;">'
-            f'<b>{p["name"]}</b></div>'
-        )
-        folium.CircleMarker(
-            location=[p["lat"], p["lon"]],
-            radius=5,
-            color="#fde68a", weight=2, opacity=0.55,
-            fill=True, fill_color="#fbbf24", fill_opacity=0.9,
-            popup=folium.Popup(popup_html, max_width=200),
-        ).add_to(food_group)
-    food_group.add_to(m)
 
     _add_ui_plugins(m, theme="light")
     legend = _make_shadow_cmap()
@@ -1097,9 +1114,12 @@ def build_time_slider_map(target_time, scale_pct):
     # absurd shadows near sunrise/sunset (altitude near 0).
     slider_js_template = """
 <script src="https://cdn.jsdelivr.net/npm/suncalc@1.9.0/suncalc.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/i18next@23.15.2/i18next.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/opening_hours@3.8.0/build/opening_hours.min.js"></script>
 <script>
 (function() {
   var BUILDINGS = __BUILDINGS__;
+  var POIS = __POIS__;
   var LAT_CENTER = __CENTER_LAT__;
   var LON_CENTER = __CENTER_LON__;
   var INITIAL_DATE = "__INITIAL_DATE__";
@@ -1177,13 +1197,13 @@ def build_time_slider_map(target_time, scale_pct):
   }
 
   function setup() {
-    if (typeof __MAP_NAME__ === "undefined" || !window.L || !window.SunCalc) {
+    if (typeof __MAP_NAME__ === "undefined" || !window.L || !window.SunCalc
+        || !window.opening_hours) {
       setTimeout(setup, 100); return;
     }
     var map = __MAP_NAME__;
     var dark = __DARK_NAME__;
     var lights = __STREET_NAME__;
-    var food = __FOOD_NAME__;
     var host = document.getElementById("lm-slider-host");
     var rangeEl = document.getElementById("lm-range");
     var dateEl = document.getElementById("lm-date");
@@ -1277,6 +1297,104 @@ def build_time_slider_map(target_time, scale_pct):
       style: shadowStyle
     }).addTo(map);
 
+    // OSM POIs with opening_hours. Each entry gets its hours string
+    // parsed once by opening_hours.js. At render time the parsed
+    // object answers open/closed for the slider's (date, time). We
+    // build a canvas-backed GeoJSON layer and refill it on each tick
+    // the same way the shadow layer works.
+    var poiParsed = [];
+    for (var pi = 0; pi < POIS.length; pi++) {
+      var p = POIS[pi];
+      var oh = null;
+      try { oh = new opening_hours(p.hours, null, 2); }
+      catch (e) { oh = null; }
+      if (oh) {
+        poiParsed.push({
+          lon: p.lon, lat: p.lat,
+          name: p.name, amenity: p.amenity,
+          hours: p.hours, oh: oh
+        });
+      }
+    }
+
+    var poiLayer = L.geoJson(null, {
+      interactive: true,
+      renderer: shadowCanvas,
+      pointToLayer: function(feat, latlng) {
+        return L.circleMarker(latlng, {
+          radius: 5,
+          color: "#fde68a", weight: 2, opacity: 0.55,
+          fillColor: "#fbbf24", fillOpacity: 0.9
+        });
+      },
+      onEachFeature: function(feat, layer) {
+        var props = feat.properties;
+        var html = '<div style="font-family:sans-serif;font-size:12px;'
+                 + 'min-width:140px;"><b>' + (props.name || "(unnamed)")
+                 + '</b><br><span style="color:#64748b;">'
+                 + props.amenity + '</span><br>'
+                 + '<span style="color:#475569;font-size:11px;">'
+                 + props.hours + '</span></div>';
+        layer.bindPopup(html, { maxWidth: 220 });
+      }
+    }).addTo(map);
+
+    // Construct a Date whose LOCAL hour/minute match the slider slot,
+    // so opening_hours.js (which uses local getHours/getDay) reads the
+    // Boston wall-clock values regardless of the viewer's own timezone.
+    function ohDate(dateStr, slot) {
+      var p = parseDateStr(dateStr);
+      var hour = Math.floor(slot / 2);
+      var min = (slot % 2) * 30;
+      return new Date(p.y, p.m, p.d, hour, min, 0);
+    }
+
+    // Cache the feature list per (date, slot) so repeat scrubs skip
+    // the getState loop. Invalidated on date change (different sun).
+    var poiCache = new Map();
+
+    function renderPois(altDeg) {
+      // Gate POIs to the night-leaning half of the day, mirroring the
+      // shadow gate. At altitude >= DAY_THRESHOLD we are firmly in day
+      // mode and the shadow layer is the story; clutter the map with
+      // lunch spots defeats that. When altitude drops below the
+      // threshold, POI markers appear and are filtered by
+      // opening_hours.
+      poiLayer.clearLayers();
+      if (altDeg >= DAY_THRESHOLD) return;
+      var key = state.dateStr + ":" + state.slot;
+      var feats;
+      if (poiCache.has(key)) {
+        feats = poiCache.get(key);
+        poiCache.delete(key); poiCache.set(key, feats);
+      } else {
+        var d = ohDate(state.dateStr, state.slot);
+        feats = [];
+        for (var i = 0; i < poiParsed.length; i++) {
+          var p = poiParsed[i];
+          try {
+            if (!p.oh.getState(d)) continue;
+          } catch (e) { continue; }
+          feats.push({
+            type: "Feature",
+            geometry: {
+              type: "Point", coordinates: [p.lon, p.lat]
+            },
+            properties: {
+              name: p.name, amenity: p.amenity, hours: p.hours
+            }
+          });
+        }
+        if (poiCache.size >= 48) {
+          poiCache.delete(poiCache.keys().next().value);
+        }
+        poiCache.set(key, feats);
+      }
+      poiLayer.addData({
+        type: "FeatureCollection", features: feats
+      });
+    }
+
     // Per-slot feature cache. Key = "YYYY-MM-DD:slot". Populated lazily
     // on first visit to a slot; subsequent visits skip the convex-hull
     // loop entirely. Viewport changes invalidate the whole cache at
@@ -1357,11 +1475,9 @@ def build_time_slider_map(target_time, scale_pct):
         if (!map.hasLayer(dark)) dark.addTo(map);
         dark.setOpacity(nightMix);
         if (!map.hasLayer(lights)) lights.addTo(map);
-        if (!map.hasLayer(food)) food.addTo(map);
       } else {
         if (map.hasLayer(dark)) map.removeLayer(dark);
         if (map.hasLayer(lights)) map.removeLayer(lights);
-        if (map.hasLayer(food)) map.removeLayer(food);
       }
 
       // Slider chrome flips on dominant mix. The 0.5 crossover lines
@@ -1422,6 +1538,7 @@ def build_time_slider_map(target_time, scale_pct):
         var s = sunAt(state.dateStr, state.slot);
         renderTheme(s.alt);
         renderShadows(s.alt, s.az);
+        renderPois(s.alt);
       });
     }
 
@@ -1443,6 +1560,9 @@ def build_time_slider_map(target_time, scale_pct):
       // Same slot on a different date has a different sun angle, so
       // cached features are invalid.
       shadowCache.clear();
+      // POI open/closed state also depends on day of week and date
+      // (weekday vs weekend, PH, specific date overrides).
+      poiCache.clear();
       updateSunMarkers();
       updateScene();
     });
@@ -1485,10 +1605,11 @@ def build_time_slider_map(target_time, scale_pct):
     slider_js = (slider_js_template
         .replace("__BUILDINGS__",
                  json.dumps(js_buildings, separators=(",", ":")))
+        .replace("__POIS__",
+                 json.dumps(osm_pois, separators=(",", ":")))
         .replace("__MAP_NAME__", m.get_name())
         .replace("__DARK_NAME__", dark_tiles.get_name())
         .replace("__STREET_NAME__", streetlight_group.get_name())
-        .replace("__FOOD_NAME__", food_group.get_name())
         .replace("__INITIAL_DATE__", target_time.strftime("%Y-%m-%d"))
         .replace("__CENTER_LAT__", str(MAP_CENTER[0]))
         .replace("__CENTER_LON__", str(MAP_CENTER[1])))
@@ -1504,9 +1625,11 @@ def build_time_slider_map(target_time, scale_pct):
     _add_info_panel(m, [
         "<b>LightMap</b> &mdash; Time Slider",
         f'<span style="color:#64748b;">{date_str}</span>',
-        f"{building_count:,} buildings &middot; 24-hour playback",
+        f"{building_count:,} buildings &middot; {len(osm_pois):,} "
+        "venues (OSM opening_hours)",
         '<span style="color:#64748b; font-size:11px;">'
-        "Drag the slider. Streetlights turn on after sunset.</span>",
+        "Drag time or pick a date. Venues toggle on/off by their "
+        "real opening hours.</span>",
     ])
 
     return m
