@@ -2,7 +2,10 @@
 
 > Shade by day. Light by night.
 
-**Live demo: [juhongpark.github.io/lightmap](https://juhongpark.github.io/lightmap/)**
+**Live demos:**
+
+- [Main view](https://juhongpark.github.io/lightmap/) — single-timestamp shadow or brightness map.
+- [Interactive time slider](https://juhongpark.github.io/lightmap/prototype_timeslider.html) — scrub through any date and time. Shadows sweep with the sun, basemap fades from dark to light as the sun rises, streetlights switch on at dusk.
 
 An interactive web map that shows where shade falls during the day and where light shines at night in Boston and Cambridge, MA. Uses real-time sun position, building geometry, streetlight locations, and tree canopy data.
 
