@@ -371,9 +371,8 @@ def _create_base_map(tiles="CartoDB positron", *, prefer_canvas=True):
         width="100%", height="100%",
         prefer_canvas=prefer_canvas,
         # min_zoom pinned to zoom_start so the user cannot zoom out past
-        # the initial view. At zoom < 16 the visible viewport grows and
-        # Leaflet has to redraw far more polygons, which chokes on the
-        # 123 K feature set. User can still zoom in to 18 for detail.
+        # the initial view (zoom < 16 explodes the redraw cost). User
+        # can still zoom in to 18 for detail inspection.
         min_zoom=16, max_zoom=18,
         # Pan-able area. North to Harvard/Somerville, west past Watertown,
         # east to Logan Airport, south into South Boston/Dorchester.

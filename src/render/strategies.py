@@ -654,15 +654,15 @@ def _add_shadow_layer_png_then_vector(m, shadows, cmap, *, cfg, out_dir):
                 polys.append(_shape(geom))
             except Exception:
                 continue
-    # Primary-visual PNG: 2 m grid is the sweet spot between file size
-    # (a few MB) and sharpness at zoom 18-19. This PNG stays on the map
-    # permanently; the vector layer ships only for click / popup and
-    # is drawn invisible. Raster rendering is what every professional
-    # shadow tool uses (ShadeMap, Shadowmap, NYU Shadow Accrual Maps,
-    # Deep Umbra) precisely because it eliminates the polygon-seam
-    # artifacts that the vector approach has along every shared edge.
+    # Primary-visual PNG. 2 m grid + union + 1.5 px gaussian blur.
+    # alpha=190 (~75 %) so shadows are clearly readable against the
+    # light CARTO basemap instead of looking like faint tint. Union
+    # merges touching per-building shadows so adjacent buildings share
+    # one geometry, minimizing seam visibility without growing the
+    # outer silhouette into sunny areas.
     _W, _H, bounds = render_shadows_png(
-        polys, png_path, resolution_m=2.0, alpha=140,
+        polys, png_path, resolution_m=2.0, alpha=190,
+        blur_px=1.5, shrink_px=0.0, union_all=True,
     )
     bounds_js = json.dumps(bounds)
 
