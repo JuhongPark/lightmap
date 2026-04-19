@@ -892,9 +892,17 @@ def build_time_slider_map(target_time, scale_pct):
     _add_building_layer(m, building_data)
 
     # Dark Matter tiles overlay, hidden by default. JS toggles on at night.
+    # min_zoom / max_zoom must match the map's pinned range. Leaflet
+    # recomputes the effective zoom span from the widest tile layer
+    # (Math.min of each layer's minZoom, Math.max of each layer's
+    # maxZoom) whenever the Map's own options.minZoom / maxZoom are
+    # unset, which is folium's default. Without these explicit values
+    # the dark tile's defaults (0 and 20) would loosen the zoom clamp
+    # the moment it was added to the map.
     dark_tiles = folium.TileLayer(
         "CartoDB dark_matter", name="Night tiles",
         overlay=True, control=False, show=False,
+        min_zoom=15, max_zoom=18,
     )
     dark_tiles.add_to(m)
 
