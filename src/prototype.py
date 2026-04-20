@@ -933,16 +933,16 @@ def build_time_slider_map(target_time, scale_pct):
     print(f"  Inside INITIAL_BBOX: {len(js_buildings)} "
           f"(rejected {bbox_rejected})")
 
-    # Tree canopies are packed into the same per-tick canvas as
-    # building shadows, but marked with kind "t" so the projection
-    # step is skipped (the canopy itself represents the shade area,
-    # no sun-angle transform needed). This preserves the existing
-    # viewport-culling path and the single-canvas render pipeline,
-    # both of which are required to keep the tick cost bounded at
-    # 100% scale.
+    # Tree canopies do not depend on sun angle (a crown at 9 am casts
+    # the same patch of shade as at 2 pm), so they belong in a static
+    # layer that Leaflet can pan/zoom with its native canvas renderer
+    # instead of the per-tick shadow pipeline. Every canopy goes into
+    # a single MultiPolygon feature — Leaflet then builds one L.Polygon
+    # with many rings rather than N wrapper objects, keeping first
+    # paint under a second even at 60K+ trees.
     print("Loading tree canopy...")
     trees = load_trees()
-    trees_added = 0
+    js_tree_polys = []
     for t in trees:
         ring = [[round(pt[0], 6), round(pt[1], 6)] for pt in t["ring"]]
         xs = [pt[0] for pt in ring]
@@ -952,10 +952,9 @@ def build_time_slider_map(target_time, scale_pct):
         if (fmaxx < bbox_min_lon or fminx > bbox_max_lon or
                 fmaxy < bbox_min_lat or fminy > bbox_max_lat):
             continue
-        bbox = [fminx, fminy, fmaxx, fmaxy]
-        js_buildings.append([round(t["h_m"], 2), ring, bbox, "t"])
-        trees_added += 1
-    print(f"  Tree canopies merged into shadow list: {trees_added}")
+        js_tree_polys.append([ring])
+    trees_added = len(js_tree_polys)
+    print(f"  Tree canopies in static layer: {trees_added}")
 
     # Rebuild the building_data for folium's static building layer too,
     # so the base layer matches the shadow-engine footprint set.
@@ -1302,6 +1301,7 @@ def build_time_slider_map(target_time, scale_pct):
 <script>
 (function() {
   var BUILDINGS = __BUILDINGS__;
+  var TREES = __TREES__;
   var POIS = __POIS__;
   var LAT_CENTER = __CENTER_LAT__;
   var LON_CENTER = __CENTER_LON__;
@@ -1405,7 +1405,8 @@ def build_time_slider_map(target_time, scale_pct):
     var state = {
       dateStr: INITIAL_DATE, slot: parseInt(rangeEl.value, 10),
       playing: false, playTimer: null, shadowLayer: null,
-      hadShadows: false
+      hadShadows: false,
+      treeLayer: null, treesVisible: false
     };
 
     function parseDateStr(s) {
@@ -1469,15 +1470,9 @@ def build_time_slider_map(target_time, scale_pct):
     // shadowed by plugin layers.
     var shadowCanvas = L.canvas({ padding: 0.5 });
     var shadowStyle = function(f) {
-      // Tree canopies get a fixed translucent green. Building
-      // shadows use a dark slate whose opacity scales with height
-      // so tall towers cast visually darker shade than short rows.
-      if (f.properties.kind === "t") {
-        return {
-          fillColor: "#14532d", color: "#14532d",
-          weight: 0, fillOpacity: 0.35, opacity: 0.35
-        };
-      }
+      // Opacity scales with building height so tall towers cast a
+      // visually darker shade than short row houses, capped so the
+      // densest blocks do not go fully opaque.
       var h = f.properties.h;
       var op = Math.min(0.18 + (h / 60) * 0.22, 0.45);
       return {
@@ -1490,6 +1485,42 @@ def build_time_slider_map(target_time, scale_pct):
       renderer: shadowCanvas,
       style: shadowStyle
     }).addTo(map);
+
+    // Dedicated canvas for the tree canopy MultiPolygon. Splitting it
+    // off the shadow canvas means building-shadow rebuilds do not
+    // force a tree-canvas repaint, and pan/zoom lets Leaflet reuse
+    // the tree canvas without touching the per-tick shadow path.
+    //
+    // L.geoJson on a 59K-polygon MultiPolygon synchronously allocates
+    // ~300K L.LatLng objects, which blocks the main thread for a few
+    // seconds. We build the layer inside setTimeout so the slider and
+    // building shadows reach first paint on schedule and the tree
+    // canvas fills in afterward. If the day/night gate has already
+    // opened by then, addTo(map) runs inside the deferred callback so
+    // a daylight view never shows an empty canopy frame.
+    var treeCanvas = L.canvas({ padding: 0.5 });
+    state.treeLayer = null;
+    state.treesVisible = false;
+    if (TREES && TREES.length) {
+      setTimeout(function() {
+        state.treeLayer = L.geoJson({
+          type: "Feature",
+          geometry: { type: "MultiPolygon", coordinates: TREES },
+          properties: {}
+        }, {
+          interactive: false,
+          renderer: treeCanvas,
+          style: {
+            fillColor: "#14532d", color: "#14532d",
+            weight: 0, fillOpacity: 0.35, opacity: 0.35
+          }
+        });
+        if (state.hadShadows && !state.treesVisible) {
+          state.treeLayer.addTo(map);
+          state.treesVisible = true;
+        }
+      }, 0);
+    }
 
     // OSM POIs with opening_hours. Each entry gets its hours string
     // parsed once by opening_hours.js. At render time the parsed
@@ -1610,19 +1641,6 @@ def build_time_slider_map(target_time, scale_pct):
         var bb = b[2];
         if (bb[2] < cullW || bb[0] > cullE ||
             bb[3] < cullS || bb[1] > cullN) continue;
-        if (b[3] === "t") {
-          // Tree canopy: ship the ring as-is. No sun projection —
-          // the canopy itself is the shade footprint, cheaper and
-          // good enough visually since canopies do not rotate.
-          var tRing = b[1].slice();
-          tRing.push(b[1][0]);
-          feats.push({
-            type: "Feature",
-            geometry: { type: "Polygon", coordinates: [tRing] },
-            properties: { h: b[0], kind: "t" }
-          });
-          continue;
-        }
         var hull = projectShadow(b[1], b[0], altDeg, azDeg);
         if (!hull || hull.length < 3) continue;
         var ring = hull.slice();
@@ -1630,7 +1648,7 @@ def build_time_slider_map(target_time, scale_pct):
         feats.push({
           type: "Feature",
           geometry: { type: "Polygon", coordinates: [ring] },
-          properties: { h: b[0], kind: "b" }
+          properties: { h: b[0] }
         });
       }
       return feats;
@@ -1641,16 +1659,25 @@ def build_time_slider_map(target_time, scale_pct):
       // horizon. Below that angle shadow_length = height / tan(alt)
       // explodes and every building hits the 500 m cap, flooding the
       // view with a uniform shadow wall. Tree canopies follow the
-      // same gate implicitly because they share this canvas layer.
+      // same gate so night views do not show green canopy patches
+      // floating over an otherwise dark basemap.
       if (altDeg < DAY_THRESHOLD) {
         if (state.hadShadows) {
           state.shadowLayer.clearLayers();
           state.hadShadows = false;
         }
+        if (state.treesVisible && state.treeLayer) {
+          map.removeLayer(state.treeLayer);
+          state.treesVisible = false;
+        }
         return;
       }
       state.shadowLayer.clearLayers();
       state.hadShadows = true;
+      if (!state.treesVisible && state.treeLayer) {
+        state.treeLayer.addTo(map);
+        state.treesVisible = true;
+      }
       var key = state.dateStr + ":" + state.slot;
       var feats;
       if (shadowCache.has(key)) {
@@ -1919,6 +1946,8 @@ def build_time_slider_map(target_time, scale_pct):
     slider_js = (slider_js_template
         .replace("__BUILDINGS__",
                  json.dumps(js_buildings, separators=(",", ":")))
+        .replace("__TREES__",
+                 json.dumps(js_tree_polys, separators=(",", ":")))
         .replace("__POIS__",
                  json.dumps(osm_pois, separators=(",", ":")))
         .replace("__MAP_NAME__", m.get_name())
