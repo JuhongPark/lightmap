@@ -929,7 +929,10 @@ def build_time_slider_map(target_time, scale_pct):
                 bbox[3] < bbox_min_lat or bbox[1] > bbox_max_lat):
             bbox_rejected += 1
             continue
-        js_buildings.append([round(h_ft * 0.3048, 2), ring, bbox])
+        # Kind flag "b" = building, "t" = tree canopy. Lets the JS
+        # shadow renderer tint tree shadows slightly green so the
+        # two cast classes are visually separable.
+        js_buildings.append([round(h_ft * 0.3048, 2), ring, bbox, "b"])
     print(f"  Inside INITIAL_BBOX: {len(js_buildings)} "
           f"(rejected {bbox_rejected})")
 
@@ -955,7 +958,7 @@ def build_time_slider_map(target_time, scale_pct):
                 fmaxy < bbox_min_lat or fminy > bbox_max_lat):
             continue
         bbox = [fminx, fminy, fmaxx, fmaxy]
-        js_buildings.append([round(t["h_m"], 2), ring, bbox])
+        js_buildings.append([round(t["h_m"], 2), ring, bbox, "t"])
         trees_added += 1
     print(f"  Trees merged into shadow list: {trees_added}")
 
@@ -1034,11 +1037,17 @@ def build_time_slider_map(target_time, scale_pct):
         name="Crime (2yr, night hrs)", show=False, control=False,
     )
     if crime_points:
+        # Tight radius + blur so each incident reads as a discrete
+        # spot. The earlier 14 / 22 combination flooded the streets
+        # with overlapping red; 6 / 8 keeps the hotspots tight and
+        # lets street geometry show through. min_opacity prevents a
+        # pale-red wash from painting low-density areas.
         HeatMap(
-            crime_points, radius=14, blur=22, max_zoom=18,
+            crime_points, radius=6, blur=8, max_zoom=18,
+            min_opacity=0.25,
             gradient={
-                0.2: "#450a0a", 0.5: "#b91c1c",
-                0.8: "#ef4444", 1.0: "#fca5a5",
+                0.35: "#450a0a", 0.6: "#991b1b",
+                0.85: "#dc2626", 1.0: "#fca5a5",
             },
         ).add_to(crime_group)
     crime_group.add_to(m)
@@ -1467,8 +1476,13 @@ def build_time_slider_map(target_time, scale_pct):
     var shadowStyle = function(f) {
       var h = f.properties.h;
       var op = Math.min(0.18 + (h / 60) * 0.22, 0.45);
+      // Tree shadows get a muted green tint so they read as foliage
+      // cover rather than a building casting. #14532d = tailwind
+      // green-900, dark enough to read as shade at low opacity but
+      // unambiguously green against the slate of building shadow.
+      var fill = f.properties.kind === "t" ? "#14532d" : "#0f172a";
       return {
-        fillColor: "#0f172a", color: "#0f172a",
+        fillColor: fill, color: fill,
         weight: 0.2, fillOpacity: op, opacity: op
       };
     };
@@ -1604,7 +1618,7 @@ def build_time_slider_map(target_time, scale_pct):
         feats.push({
           type: "Feature",
           geometry: { type: "Polygon", coordinates: [ring] },
-          properties: { h: b[0] }
+          properties: { h: b[0], kind: b[3] || "b" }
         });
       }
       return feats;
