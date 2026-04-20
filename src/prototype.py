@@ -1469,15 +1469,19 @@ def build_time_slider_map(target_time, scale_pct):
     // shadowed by plugin layers.
     var shadowCanvas = L.canvas({ padding: 0.5 });
     var shadowStyle = function(f) {
-      // Tree canopies get a fixed translucent green. Building
-      // shadows use a dark slate whose opacity scales with height
-      // so tall towers cast visually darker shade than short rows.
+      // Tree shadows get a muted dark green so they read as foliage
+      // shade rather than a building casting — the tint mimics the
+      // way light filtered through leaves comes out slightly green.
+      // Opacity stays fixed at a softer level than buildings so tree
+      // shade layers under building shade rather than competing.
       if (f.properties.kind === "t") {
         return {
-          fillColor: "#14532d", color: "#14532d",
-          weight: 0, fillOpacity: 0.35, opacity: 0.35
+          fillColor: "#1e3a2a", color: "#1e3a2a",
+          weight: 0, fillOpacity: 0.32, opacity: 0.32
         };
       }
+      // Building shadows: dark slate, opacity scales with height so
+      // tall towers cast visually darker shade than short rows.
       var h = f.properties.h;
       var op = Math.min(0.18 + (h / 60) * 0.22, 0.45);
       return {
@@ -1610,19 +1614,11 @@ def build_time_slider_map(target_time, scale_pct):
         var bb = b[2];
         if (bb[2] < cullW || bb[0] > cullE ||
             bb[3] < cullS || bb[1] > cullN) continue;
-        if (b[3] === "t") {
-          // Tree canopy: ship the ring as-is. No sun projection —
-          // the canopy itself is the shade footprint, cheaper and
-          // good enough visually since canopies do not rotate.
-          var tRing = b[1].slice();
-          tRing.push(b[1][0]);
-          feats.push({
-            type: "Feature",
-            geometry: { type: "Polygon", coordinates: [tRing] },
-            properties: { h: b[0], kind: "t" }
-          });
-          continue;
-        }
+        // Same sun-projection path for buildings and tree patches —
+        // trees only differ in height (uniform 10 m) and kind, so
+        // their shadows come out shorter and cast in the same sun
+        // direction as buildings. This is what makes canopy shade
+        // read as a shadow rather than a flat green overlay.
         var hull = projectShadow(b[1], b[0], altDeg, azDeg);
         if (!hull || hull.length < 3) continue;
         var ring = hull.slice();
@@ -1630,7 +1626,7 @@ def build_time_slider_map(target_time, scale_pct):
         feats.push({
           type: "Feature",
           geometry: { type: "Polygon", coordinates: [ring] },
-          properties: { h: b[0], kind: "b" }
+          properties: { h: b[0], kind: b[3] === "t" ? "t" : "b" }
         });
       }
       return feats;
