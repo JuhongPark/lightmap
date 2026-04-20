@@ -42,6 +42,8 @@ import subprocess
 import sys
 
 import httpx
+from shapely.geometry import shape
+from shapely.ops import unary_union
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DATA_DIR = os.path.join(REPO_ROOT, "data")
@@ -465,11 +467,73 @@ def boston_features():
     return out
 
 
+def _merge_canopy(features, bridge_deg=5e-5, simplify_deg=3e-5):
+    """Union every crown polygon into a coarser "shade area" layer.
+
+    The time-slider only needs to know *where* canopy shade falls,
+    not the individual tree it came from. Unioning 60K crown polygons
+    into a few thousand merged patches drops the rendered polygon
+    count by ~20x and the embedded JSON size by similar. The
+    `bridge_deg` buffer (~5.5 m at 42 deg N) glues adjacent crowns
+    along a tree-lined street into a continuous shade strip. We
+    un-buffer by the same amount so the outer footprint stays close
+    to the original canopy reach; the net effect is "same shade
+    area, one polygon per shade zone instead of per tree".
+    """
+    polys = []
+    for f in features:
+        g = f.get("geometry") or {}
+        if g.get("type") == "Polygon":
+            try:
+                polys.append(shape(g))
+            except Exception:
+                continue
+    if not polys:
+        return []
+    print(f"  Union input: {len(polys)} crown polygons")
+    buffered = [p.buffer(bridge_deg, resolution=2) for p in polys]
+    merged = unary_union(buffered)
+    if not merged.is_empty:
+        merged = merged.buffer(-bridge_deg, resolution=2)
+    merged = merged.simplify(simplify_deg, preserve_topology=True)
+
+    if merged.is_empty:
+        return []
+    if merged.geom_type == "Polygon":
+        geoms = [merged]
+    elif merged.geom_type == "MultiPolygon":
+        geoms = list(merged.geoms)
+    else:
+        return []
+
+    out_feats = []
+    for g in geoms:
+        if g.is_empty:
+            continue
+        rings = [list(g.exterior.coords)]
+        for r in g.interiors:
+            rings.append(list(r.coords))
+        rings = [[[round(x, 6), round(y, 6)] for x, y in r] for r in rings]
+        out_feats.append({
+            "type": "Feature",
+            "geometry": {"type": "Polygon", "coordinates": rings},
+            "properties": {"height_m": DEFAULT_TREE_HEIGHT_M},
+        })
+    total_pts = sum(sum(len(r) for r in f["geometry"]["coordinates"])
+                    for f in out_feats)
+    print(f"  Union output: {len(out_feats)} patches, {total_pts} vertices")
+    return out_feats
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--skip-boston", action="store_true",
                         help="Skip the 2019-2024 Boston download.")
+    parser.add_argument("--no-merge", action="store_true",
+                        help="Keep per-crown polygons instead of unioning "
+                             "into shade-area patches. Produces a much "
+                             "larger output file.")
     args = parser.parse_args()
 
     if os.path.exists(OUT_PATH) and not args.force:
@@ -487,6 +551,10 @@ def main():
         except Exception as e:
             print(f"Boston tree canopy failed: {e}")
             print("  Continuing with Cambridge only.")
+
+    if not args.no_merge:
+        print("\nMerging crowns into shade-area patches:")
+        all_feats = _merge_canopy(all_feats)
 
     out = {"type": "FeatureCollection", "features": all_feats}
     with open(OUT_PATH, "w") as f:
