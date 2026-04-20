@@ -1,6 +1,7 @@
 import csv
 import json
 import os
+import subprocess
 import sys
 import zipfile
 
@@ -197,6 +198,28 @@ def download_boston_food():
     )
 
 
+def _run_sibling_script(name):
+    """Run another script in this directory with the current Python.
+
+    The time-slider-specific downloaders (OSM POIs, tree canopy,
+    safety overlays) each live in their own file because they hit
+    different APIs and have their own CLI knobs. We invoke them as
+    subprocesses from this top-level downloader so a single command
+    pulls every dataset the prototype needs.
+    """
+    path = os.path.join(os.path.dirname(__file__), name)
+    print(f"\n--- {name} ---")
+    try:
+        rc = subprocess.run([sys.executable, path], check=False).returncode
+    except OSError as e:
+        print(f"  failed to launch {name}: {e}")
+        return False
+    if rc != 0:
+        print(f"  {name} exited with code {rc}")
+        return False
+    return True
+
+
 def main():
     print("=== LightMap Data Download ===\n")
     results = [
@@ -206,6 +229,14 @@ def main():
         download_boston_streetlights(),
         download_boston_food(),
     ]
+    # Time-slider add-on datasets. These have their own scripts and
+    # CLI flags, so we simply shell out. Each script is idempotent
+    # (skips if its output already exists, use --force to rebuild).
+    for name in ("download_osm_pois.py",
+                 "download_trees.py",
+                 "download_safety.py"):
+        results.append(_run_sibling_script(name))
+
     if all(results):
         print("\nAll downloads complete.")
     else:
