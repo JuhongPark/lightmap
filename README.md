@@ -146,12 +146,12 @@ Opens `docs/prototype.html` in your browser. Available flags:
 | `--time "YYYY-MM-DD HH:MM"` | Render a specific timestamp. |
 | `--dual` | Render day and night side by side on one synchronized map. |
 | `--time-compare` | Shadow animation across six hours with a playback slider. |
-| `--time-slider` | 24-hour playback. Shadows move with the sun during the day. Streetlights and food-establishment markers appear automatically after sunset. |
+| `--time-slider` | Interactive 24-hour playback with free date picker. Shadows (buildings + Cambridge tree canopy) move with the sun during the day. After sunset the basemap fades dark, the streetlight heatmap and crime heatmap appear, OSM venues turn on one by one based on their real `opening_hours` tag, and crash pins populate. Weather and UV for the selected date are fetched live from Open-Meteo. |
 
 ### 5. Run tests
 
 ```
-PYTHONPATH=src .venv/bin/python -m unittest tests.test_shadow
+PYTHONPATH=src .venv/bin/python -m unittest discover tests
 ```
 
 ## Running at full 100% scale
@@ -204,7 +204,10 @@ Documentation is being added. This section will be updated as new documents are 
 - [Optimization Plan](planning/optimization-plan.md) -- Step-by-step day pipeline optimization from 102s to roughly 12s of compute.
 - [Render Optimization Plan](planning/render-optimization-plan.md) -- r0 through r13 browser-side render strategies, from inline SVG that never loads to PNG-raster-primary with merged shadows.
 - [Deploy Size Trim Plan](planning/deploy-size-trim-plan.md) -- Coordinate precision trim, bucket merge, raster-primary rendering experiments.
+- [Time Slider Plan](planning/time-slider-plan.md) -- Phase 1 MVP (pre-baked) through Phase 2 live client-side sun and shadow compute.
+- [Extensions Plan](planning/extensions-plan.md) -- Tree canopy, weather, and safety-overlay rollout with per-layer scope and risks.
 - [Bench Protocol](planning/bench-protocol.md) -- Checklist and red flags for producing trustworthy bench numbers.
+- [Project TODOs](planning/TODO.md) -- Recently completed items and open follow-ups.
 - [Course Information](planning/course.md) -- MIT 1.001 course details and grading rubric.
 
 ## License
