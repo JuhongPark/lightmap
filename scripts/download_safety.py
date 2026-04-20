@@ -25,6 +25,7 @@ import datetime
 import json
 import os
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -41,16 +42,42 @@ CRASH_ID = "e4bfe397-6bfc-49c5-9367-c879fac7401d"
 INITIAL_BBOX = (42.335, -71.130, 42.385, -71.040)  # (minlat, minlon, maxlat, maxlon)
 
 
-def _run_sql(query):
-    """Execute a CKAN datastore_search_sql query and return records."""
+def _run_sql(query, retries=3):
+    """Execute a CKAN datastore_search_sql query and return records.
+
+    Retries on transient network errors. On HTTP 4xx (authorization,
+    bad query) we surface the CKAN error body so the user can tell
+    whether to adjust the query vs retry later.
+    """
     params = urllib.parse.urlencode({"sql": query})
     url = f"{CKAN_BASE}?{params}"
-    req = urllib.request.Request(url, headers={"User-Agent": "lightmap/0.1"})
-    with urllib.request.urlopen(req, timeout=180) as resp:
-        js = json.load(resp)
-    if not js.get("success"):
-        raise RuntimeError(f"CKAN query failed: {js.get('error')}")
-    return js["result"]["records"]
+    last_err = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "lightmap/0.1"},
+            )
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                js = json.load(resp)
+            if not js.get("success"):
+                raise RuntimeError(f"CKAN error: {js.get('error')}")
+            return js["result"]["records"]
+        except urllib.error.HTTPError as e:
+            # CKAN puts the useful detail in the response body.
+            body = ""
+            try:
+                body = e.read().decode()[:500]
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"CKAN HTTP {e.code} {e.reason}: {body}"
+            ) from e
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last_err = e
+            print(f"  transient error on attempt {attempt + 1}: {e}")
+    raise RuntimeError(
+        f"CKAN request failed after {retries} attempts: {last_err}"
+    )
 
 
 def _write_geojson(path, features, label):

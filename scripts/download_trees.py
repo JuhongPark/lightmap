@@ -25,6 +25,7 @@ import json
 import math
 import os
 import sys
+import urllib.error
 import urllib.request
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -186,10 +187,30 @@ def simplify_feature(feat, tol):
     return feat
 
 
-def fetch_bytes(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "lightmap/0.1"})
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        return resp.read()
+def fetch_bytes(url, retries=3):
+    last_err = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "lightmap/0.1"},
+            )
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode()[:200]
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"HTTP {e.code} {e.reason} for {url}\n  {body}"
+            ) from e
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last_err = e
+            print(f"  transient network error on attempt {attempt + 1}: {e}")
+    raise RuntimeError(
+        f"download failed after {retries} attempts: {last_err}"
+    )
 
 
 def main():
