@@ -929,19 +929,17 @@ def build_time_slider_map(target_time, scale_pct):
                 bbox[3] < bbox_min_lat or bbox[1] > bbox_max_lat):
             bbox_rejected += 1
             continue
-        # Kind flag "b" = building, "t" = tree canopy. Lets the JS
-        # shadow renderer tint tree shadows slightly green so the
-        # two cast classes are visually separable.
-        js_buildings.append([round(h_ft * 0.3048, 2), ring, bbox, "b"])
+        js_buildings.append([round(h_ft * 0.3048, 2), ring, bbox])
     print(f"  Inside INITIAL_BBOX: {len(js_buildings)} "
           f"(rejected {bbox_rejected})")
 
-    # Trees go into the same shadow-producing list as buildings. The
-    # JS engine does not distinguish between the two — a tree is just
-    # a short building for shadow-projection purposes. Heights from
-    # the Cambridge canopy snapshot default to 10 m so tree shadows
-    # come out roughly 3-4 m long at midday, stretching to ~40 m at
-    # golden-hour altitudes.
+    # Tree canopies are packed into the same per-tick canvas as
+    # building shadows, but marked with kind "t" so the projection
+    # step is skipped (the canopy itself represents the shade area,
+    # no sun-angle transform needed). This preserves the existing
+    # viewport-culling path and the single-canvas render pipeline,
+    # both of which are required to keep the tick cost bounded at
+    # 100% scale.
     print("Loading tree canopy...")
     trees = load_trees()
     trees_added = 0
@@ -951,16 +949,13 @@ def build_time_slider_map(target_time, scale_pct):
         ys = [pt[1] for pt in ring]
         fminx, fmaxx = min(xs), max(xs)
         fminy, fmaxy = min(ys), max(ys)
-        # Defensive bbox intersection even though the downloader
-        # already filters to INITIAL_BBOX — keeps data and config in
-        # sync if INITIAL_BBOX is ever tightened.
         if (fmaxx < bbox_min_lon or fminx > bbox_max_lon or
                 fmaxy < bbox_min_lat or fminy > bbox_max_lat):
             continue
         bbox = [fminx, fminy, fmaxx, fmaxy]
         js_buildings.append([round(t["h_m"], 2), ring, bbox, "t"])
         trees_added += 1
-    print(f"  Trees merged into shadow list: {trees_added}")
+    print(f"  Tree canopies merged into shadow list: {trees_added}")
 
     # Rebuild the building_data for folium's static building layer too,
     # so the base layer matches the shadow-engine footprint set.
@@ -1474,15 +1469,19 @@ def build_time_slider_map(target_time, scale_pct):
     // shadowed by plugin layers.
     var shadowCanvas = L.canvas({ padding: 0.5 });
     var shadowStyle = function(f) {
+      // Tree canopies get a fixed translucent green. Building
+      // shadows use a dark slate whose opacity scales with height
+      // so tall towers cast visually darker shade than short rows.
+      if (f.properties.kind === "t") {
+        return {
+          fillColor: "#14532d", color: "#14532d",
+          weight: 0, fillOpacity: 0.35, opacity: 0.35
+        };
+      }
       var h = f.properties.h;
       var op = Math.min(0.18 + (h / 60) * 0.22, 0.45);
-      // Tree shadows get a muted green tint so they read as foliage
-      // cover rather than a building casting. #14532d = tailwind
-      // green-900, dark enough to read as shade at low opacity but
-      // unambiguously green against the slate of building shadow.
-      var fill = f.properties.kind === "t" ? "#14532d" : "#0f172a";
       return {
-        fillColor: fill, color: fill,
+        fillColor: "#0f172a", color: "#0f172a",
         weight: 0.2, fillOpacity: op, opacity: op
       };
     };
@@ -1611,6 +1610,19 @@ def build_time_slider_map(target_time, scale_pct):
         var bb = b[2];
         if (bb[2] < cullW || bb[0] > cullE ||
             bb[3] < cullS || bb[1] > cullN) continue;
+        if (b[3] === "t") {
+          // Tree canopy: ship the ring as-is. No sun projection —
+          // the canopy itself is the shade footprint, cheaper and
+          // good enough visually since canopies do not rotate.
+          var tRing = b[1].slice();
+          tRing.push(b[1][0]);
+          feats.push({
+            type: "Feature",
+            geometry: { type: "Polygon", coordinates: [tRing] },
+            properties: { h: b[0], kind: "t" }
+          });
+          continue;
+        }
         var hull = projectShadow(b[1], b[0], altDeg, azDeg);
         if (!hull || hull.length < 3) continue;
         var ring = hull.slice();
@@ -1618,7 +1630,7 @@ def build_time_slider_map(target_time, scale_pct):
         feats.push({
           type: "Feature",
           geometry: { type: "Polygon", coordinates: [ring] },
-          properties: { h: b[0], kind: b[3] || "b" }
+          properties: { h: b[0], kind: "b" }
         });
       }
       return feats;
@@ -1628,7 +1640,8 @@ def build_time_slider_map(target_time, scale_pct):
       // Keep shadows off until the sun is DAY_THRESHOLD above the
       // horizon. Below that angle shadow_length = height / tan(alt)
       // explodes and every building hits the 500 m cap, flooding the
-      // view with a uniform shadow wall.
+      // view with a uniform shadow wall. Tree canopies follow the
+      // same gate implicitly because they share this canvas layer.
       if (altDeg < DAY_THRESHOLD) {
         if (state.hadShadows) {
           state.shadowLayer.clearLayers();
