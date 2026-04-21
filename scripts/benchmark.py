@@ -554,7 +554,7 @@ def _preimport_heavy_modules() -> None:
         _add_building_layer,
         _add_food_layer,
         _add_info_panel,
-        _add_shadow_layer,
+        add_shadow_layer,
         _add_streetlight_layer,
         _add_ui_plugins,
         _create_base_map,
@@ -729,7 +729,7 @@ def run_benchmark(config: BenchConfig, label: str,
     # --- Stage 4: Folium render day ---
     import folium
     from prototype import (
-        _add_building_layer, _add_info_panel, _add_shadow_layer,
+        _add_building_layer, _add_info_panel, add_shadow_layer,
         _add_ui_plugins, _create_base_map, _make_shadow_cmap,
     )
 
@@ -737,7 +737,7 @@ def run_benchmark(config: BenchConfig, label: str,
         m = _create_base_map("CartoDB positron")
         _add_building_layer(m, building_data)
         cmap = _make_shadow_cmap()
-        _add_shadow_layer(m, shadows, cmap)
+        add_shadow_layer(m, shadows, cmap)
         _add_ui_plugins(m, theme="light")
         cmap.add_to(m)
         _add_info_panel(m, ["test"])
