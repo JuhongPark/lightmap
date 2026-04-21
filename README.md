@@ -2,10 +2,7 @@
 
 > Shade by day. Light by night.
 
-**Live demos:**
-
-- [Main view](https://juhongpark.github.io/lightmap/) — single-timestamp shadow or brightness map.
-- [Interactive time slider](https://juhongpark.github.io/lightmap/prototype_timeslider.html) — scrub through any date and time. Shadows sweep with the sun, basemap fades from dark to light as the sun rises, streetlights switch on at dusk.
+**Live demo:** [Interactive time slider](https://juhongpark.github.io/lightmap/prototype_timeslider.html) — scrub through any date and time. Shadows sweep with the sun, basemap fades from dark to light as the sun rises, streetlights switch on at dusk, and violent-crime pins appear on top of the night layer.
 
 An interactive web map that shows where shade falls during the day and where light shines at night in Boston and Cambridge, MA. Uses real-time sun position, building geometry, streetlight locations, and tree canopy data.
 
@@ -17,7 +14,7 @@ Built by **Juhong Park** (System Design and Management, MIT) as a term project f
 | --- | --- |
 | <img src="docs/screenshots/day.png" width="400"> | <img src="docs/screenshots/night.png" width="400"> |
 
-123K buildings with shadows across Boston and Cambridge (day). 80K streetlights as a brightness heatmap with 3K food establishment markers (night).
+123K buildings with shadows and ~59K tree-canopy crowns (day). 80K streetlights as a bright-yellow heatmap with ~760 time-gated OSM venue dots and ~830 violent-crime diamond pins (night).
 
 ### How It Works
 
@@ -50,14 +47,15 @@ The shadow engine computes sun position (pvlib) and projects each building footp
 | Cambridge streetlights | 6K | [Cambridge GIS](https://github.com/cambridgegis/cambridgegis_data_infra) | Brightness heatmap |
 | Boston food establishments (active licenses) | 3K | [data.boston.gov CKAN](https://data.boston.gov/dataset/active-food-establishment-licenses) | Standalone night map markers |
 | **OSM amenity POIs (with `opening_hours`)** | 760 inside viewport | [OpenStreetMap via Overpass API](https://overpass-turbo.eu/) | Time-slider time-aware venue markers |
-| **Cambridge tree canopy (2018)** | ~11K polygons inside viewport | [Cambridge GIS](https://github.com/cambridgegis/cambridgegis_data_environmental) | Tree shade in the time-slider shadow engine. Each polygon is treated as a 10 m canopy and casts a shadow along the same sun angle as buildings. Boston's BPDA canopy (EPSG:2249, 1 GB shapefile) is a follow-up. |
+| **Tree canopy (Cambridge 2018 + Boston 2019-2024)** | ~59K per-crown polygons inside viewport | [Cambridge GIS](https://github.com/cambridgegis/cambridgegis_data_environmental) + [Boston BPDA Tree Canopy Change Assessment](https://data.boston.gov/dataset/tree-canopy-change-assessment) | Tree shade in the time-slider shadow engine. Each polygon is treated as a 10 m canopy and casts a shadow along the same sun angle as buildings. Boston LiDAR crowns are streamed in-place from a 1 GB ZIP via `ogr2ogr`, simplified to ~2 m, and height-clamped to 1.5-40 m. The merge step is intentionally skipped (per-crown) so the canopy boundary tracks the actual tree footprint instead of the buffer-union's inflated shade strip. |
 | **Weather + UV (Open-Meteo)** | 1 daily record per slider date | [Open-Meteo API](https://open-meteo.com/) | Info panel temperature range + max UV for the slider's currently selected date. Free and no auth. Fetched live from the browser: forecast API for today-to-future-16-days, archive API for historical dates. |
 | **Boston crime incidents (last 2 years, night hours)** | ~19K inside viewport | [data.boston.gov CKAN](https://data.boston.gov/dataset/crime-incident-reports-august-2015-to-date-source-new-system) | Night-only safety heatmap. Aggregated, not live. Filtered to hours 18-05 so the map shows the pattern people actually encounter when walking home. |
-| **Boston crash records (Vision Zero, last 2 years)** | ~1.6K inside viewport | [data.boston.gov CKAN](https://data.boston.gov/dataset/vision-zero-crash-records) | Orange pins on the night layer. Click to see crash mode (mv / ped / bike). |
+| **Boston crime incidents -- violent subset (last 2 years)** | ~830 inside viewport | Filtered from the crime dataset above | Red diamond pins on the night layer. Murder, aggravated assault, robbery, sexual offenses, firearm and weapon incidents. Click to see the offense description. |
+| **OpenStreetMap water polygons** | 175 features inside viewport | [OpenStreetMap via Overpass API](https://overpass-turbo.eu/) | Mask used by `scripts/clip_trees_by_water.py` so the tree-canopy layer never extends over the Charles, Fort Point Channel, or the harbor. |
 
 ### Time-slider data scope
 
-The interactive time slider embeds only the Boston + Cambridge core (a bbox roughly covering MIT, central Cambridge, Back Bay, and downtown Boston). Data outside this bbox is not loaded — this keeps the shipped HTML under 20 MB and the browser scrub responsive. See `src/render/strategies.py` `INITIAL_BBOX` for the exact coordinates.
+The interactive time slider embeds only the Boston + Cambridge core (a bbox roughly covering MIT, central Cambridge, Back Bay, and downtown Boston). Data outside this bbox is not loaded. The shipped HTML is ~27 MB at 100% scale — the bulk comes from the per-crown tree-canopy polygons, which trade some file size for accurate canopy boundaries. See `src/render/strategies.py` `INITIAL_BBOX` for the exact coordinates.
 
 ### How OpenStreetMap powers the venue time-gating
 
@@ -108,20 +106,25 @@ This downloads:
 | `data/cambridge/streetlights/streetlights.geojson` | 2.7 MB | Cambridge GIS |
 | `data/safety/food_establishments.csv` | 180 KB | data.boston.gov CKAN |
 
-The time-slider adds three more datasets. Pull them with separate scripts so the external APIs are hit only when needed:
+The time-slider adds four more datasets. Pull them with separate scripts so the external APIs are hit only when needed:
 
 ```
 .venv/bin/python scripts/download_osm_pois.py
 .venv/bin/python scripts/download_trees.py
 .venv/bin/python scripts/download_safety.py
+.venv/bin/python scripts/download_water.py
+.venv/bin/python scripts/clip_trees_by_water.py
 ```
 
 | File | Size | Source |
 | --- | --- | --- |
 | `data/osm/pois.geojson` | ~150 KB | OpenStreetMap via Overpass API |
-| `data/trees/trees.geojson` | ~3.5 MB | Cambridge GIS (TopoJSON → GeoJSON, simplified to ~2 m tolerance) |
+| `data/trees/trees.geojson` | ~14 MB (Boston + Cambridge, per-crown) | Cambridge GIS TopoJSON + Boston BPDA TreeTops2024 (streamed from a 1 GB ZIP via ogr2ogr, simplified to ~2 m tolerance) |
+| `data/water/water.geojson` | ~350 KB | OpenStreetMap via Overpass API (`natural=water`, `waterway=riverbank|river`) |
 | `data/safety/crime.geojson` | ~3 MB | Boston data.boston.gov CKAN (last 2 years, night hours, INITIAL_BBOX filtered) |
-| `data/safety/crashes.geojson` | ~220 KB | Boston data.boston.gov CKAN (last 2 years, INITIAL_BBOX filtered) |
+| `data/safety/crashes.geojson` | ~220 KB | Boston data.boston.gov CKAN (last 2 years, INITIAL_BBOX filtered). Still downloaded but no longer rendered — the night layer now uses the violent-crime subset of `crime.geojson` instead. |
+
+`clip_trees_by_water.py` is a post-processing step that subtracts the water union from `trees.geojson` in place. Run it after every `download_trees.py --force` so the canopy layer never floats over water.
 
 ### 3. Pre-process buildings into SQLite
 
@@ -131,22 +134,24 @@ Converts the raw GeoJSON into a compact `data/buildings.db` with WKB blobs and a
 .venv/bin/python scripts/preprocess_buildings.py
 ```
 
-### 4. Run the prototype
+### 4. Build the time-slider
+
+The time-slider is the single production artifact. Build it with:
 
 ```
-.venv/bin/python src/prototype.py --scale 10
+.venv/bin/python src/prototype.py --time-slider --out prototype_timeslider.html --scale 100
 ```
 
-Opens `docs/prototype.html` in your browser. Available flags:
+Opens `docs/prototype_timeslider.html` in your browser. During the day, shadows (buildings + per-crown tree canopy) move with the sun. After sunset the basemap fades dark, the streetlight heatmap switches on as a bright-yellow glow, OSM venues turn on one by one based on their real `opening_hours` tag, and violent-crime red-diamond pins appear on top. Weather and UV for the selected date are fetched live from Open-Meteo. Auto-play advances one slot per second.
+
+Available flags:
 
 | Flag | Effect |
 | --- | --- |
-| `--scale N` | Percent of data to render. Valid values: 0, 1, 10, 50, 100. Default 1. |
-| `--night` | Force night mode instead of the default afternoon time. |
-| `--time "YYYY-MM-DD HH:MM"` | Render a specific timestamp. |
-| `--dual` | Render day and night side by side on one synchronized map. |
-| `--time-compare` | Shadow animation across six hours with a playback slider. |
-| `--time-slider` | Interactive 24-hour playback with free date picker. Shadows (buildings + Cambridge tree canopy) move with the sun during the day. After sunset the basemap fades dark, the streetlight heatmap and crime heatmap appear, OSM venues turn on one by one based on their real `opening_hours` tag, and crash pins populate. Weather and UV for the selected date are fetched live from Open-Meteo. |
+| `--time-slider` | Build the interactive time-slider HTML. This is the only supported output. |
+| `--scale N` | Percent of data to render. Valid values: 0, 1, 10, 50, 100. Default 1. Use 100 for the shipping build. |
+| `--out NAME` | Output filename under `docs/`. Default `prototype.html`, so always pass `--out prototype_timeslider.html` for the time-slider. |
+| `--time "YYYY-MM-DD HH:MM"` | Starting timestamp the slider opens at. |
 
 ### 5. Run tests
 
@@ -176,17 +181,17 @@ Creates the schema, inserts 123K buildings, builds a GiST spatial index, and ena
 .venv/bin/python scripts/preprocess_postgis.py
 ```
 
-### 3. Run at 100% scale
+### 3. Build the time-slider at 100% scale
 
 ```
-.venv/bin/python src/prototype.py --scale 100
+.venv/bin/python src/prototype.py --time-slider --out prototype_timeslider.html --scale 100
 ```
 
 The code automatically detects the PostGIS container and uses it for the 100% path. Set the environment variable `LIGHTMAP_NO_POSTGIS=1` to force the pure Python fallback.
 
 ## Benchmarking
 
-Measures each stage of the day pipeline at 100% scale, best-of-5 runs.
+Measures each stage of the shadow pipeline at 100% scale, best-of-5 runs.
 
 ```
 .venv/bin/python scripts/benchmark.py
