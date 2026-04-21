@@ -128,7 +128,7 @@ Verify:
 |------|-------|------------|
 | Boston buildings download fails (106MB) | prep | Retry. Fall back to CKAN CSV (28K with WKT). |
 | Shadow computation too slow at 50%+ | 50% | Profile. Skip buildings below height threshold. |
-| folium HTML too large at 100% | 100% | Acceptable for prototype. Interactive app uses MapLibre. |
+| folium HTML too large at 100% | 100% | Shipped anyway. INITIAL_BBOX pre-filter + 3 m simplify + 5-decimal coords + per-strategy render optimizations kept the time-slider artifact at ~27 MB. See `deploy-size-trim-plan.md`. |
 | Memory issues with large GeoJSON | 50%+ | Process in chunks. Reduce precision of coordinates. |
 
 ## File Changes

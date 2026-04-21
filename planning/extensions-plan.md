@@ -1,6 +1,16 @@
 # LightMap Extensions Plan
 
+> Status: all three phases landed. This document preserves the planning rationale. For what actually shipped, see `project.md` "Shipped Features" and the per-phase status notes below.
+
 Related: [Project Description](project.md), [Prototype Plan](prototype-plan.md), [Time Slider Plan](time-slider-plan.md), [Data Catalog](data-catalog.md), [Render Optimization Plan](render-optimization-plan.md)
+
+## Outcome summary
+
+| Phase | Status | Shipped as |
+| --- | --- | --- |
+| 1. Tree canopy | Landed | Projected per-crown shadows. Cambridge 2018 TopoJSON + Boston 2019-2024 BPDA TreeTops, streamed via `ogr2ogr`, simplified ~2 m, height-clamped 1.5-40 m, water-clipped via `scripts/clip_trees_by_water.py`. |
+| 2. Weather / UV | Landed | Live Open-Meteo fetch in the slider info panel. Forecast API for today + next 16 days, archive API for historical dates. |
+| 3. Safety overlay | Landed (partial scope) | Night-mode red-diamond violent-crime pins (murder, aggravated assault, robbery, sexual offenses, firearm, weapon). Heatmap approach was explored then dropped for the pin approach. Crashes downloaded but not rendered. Cambridge crime not integrated. |
 
 ## Goal
 

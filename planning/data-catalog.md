@@ -1,6 +1,31 @@
 # Data Catalog
 
-Last updated: **2026-04-08**. All URLs, record counts, column names, and API responses verified.
+Initial research: **2026-04-08**. Shipped-status annotations added: **2026-04-21**.
+
+## Shipped vs researched
+
+The catalog preserves every dataset investigated during planning. Only the following are actually loaded by the production `docs/prototype_timeslider.html`. Everything else was researched but not integrated, usually because the shipped alternative covered the same need or because the scope for the course deliverable was narrower than planned.
+
+**Shipped (loaded into the time-slider artifact):**
+
+- #1 Boston buildings (BPDA)
+- #9 Cambridge buildings (Cambridge GIS)
+- #2 Boston streetlights
+- #10 Cambridge streetlights
+- #3 Boston tree canopy (BPDA TreeTops 2019-2024)
+- #11 Cambridge tree canopy (2018 TopoJSON)
+- #4 Boston crime (violent subset, last 2 years, night hours)
+- #16 Open-Meteo Forecast API (live browser fetch, today + 16 days)
+- #24 Open-Meteo Archive API (live browser fetch, historical dates)
+- #32 OSM amenity POIs with `opening_hours` (new entry, see below)
+- #33 OSM water polygons (new entry, see below)
+
+**Downloaded but not currently rendered** (the `download_*.py` scripts still fetch them; left in place so the time-slider can pick them up without re-running a network job):
+
+- #5 Boston Vision Zero crashes — superseded by the violent-crime subset of #4.
+- #6 Boston food establishments — superseded by OSM POIs (#32), which carry `opening_hours`.
+
+**Researched only** (#7, #8, #12-#15, #17-#23, #25-#31): kept in this catalog as leads for future work.
 
 ## Boston (data.boston.gov)
 
@@ -37,11 +62,11 @@ Last updated: **2026-04-08**. All URLs, record counts, column names, and API res
 | Field | Value |
 | --- | --- |
 | URL | https://data.boston.gov/dataset/tree-canopy-change-assessment |
-| Records | 108,131 |
-| Format | Shapefile (ZIP, ~1 GB) |
-| Data period | 2019 baseline |
-| CRS | EPSG:2249 (Massachusetts State Plane). Requires reprojection to WGS84 |
-| Used for | Daytime tree shade |
+| Records | 108,131 total. Filtered to INITIAL_BBOX and per-crown the shipped subset is ~45K |
+| Format | Shapefile ZIP (~1 GB). Streamed in-place via `ogr2ogr` inside `scripts/download_trees.py`, no full extraction needed |
+| Data period | Composite 2019 baseline + 2024 refresh (BPDA TreeTops 2019-2024) |
+| CRS | EPSG:2249 (Massachusetts State Plane). Reprojected to WGS84 by `ogr2ogr` |
+| Used for | Daytime tree shade. Per-crown polygons projected along the sun angle as if each crown is 10 m tall. Height-clamped 1.5-40 m. Simplified at ~2 m tolerance. Water-clipped via `scripts/clip_trees_by_water.py` |
 | Verified | 2026-04-08. URL confirmed (old slug `canopy-change-assessment` returns 404). ZIP download only, no API query available |
 
 ### 4. Crime Incidents
@@ -50,10 +75,10 @@ Last updated: **2026-04-08**. All URLs, record counts, column names, and API res
 | --- | --- |
 | API Resource ID | `b973d8cb-eeb2-4e7e-99da-c92938efc9c0` |
 | Records | ~258K (live dataset, growing). 94% with valid coordinates |
-| Key columns | `OCCURRED_ON_DATE`, `HOUR` (0-23), `Lat`, `Long` |
+| Key columns | `OCCURRED_ON_DATE`, `HOUR` (0-23), `Lat`, `Long`, `OFFENSE_DESCRIPTION` |
 | Format | CSV |
-| Data period | 2023-01-01 to present |
-| Used for | Nighttime safety context (filtered to hours 18-06) |
+| Data period | Last 2 years, filtered by `scripts/download_safety.py` |
+| Used for | **Shipped.** `data/safety/crime.geojson` is the aggregate (~19K inside bbox, filtered to hours 18-05). The violent subset (~830 inside bbox: murder, aggravated assault, robbery, sexual offenses, firearm, weapon) is what the time-slider actually renders as red-diamond pins in night mode. The broader aggregate stays on disk for follow-up heatmap experiments. |
 | Verified | 2026-04-08. 257,954 at time of check. `OFFENSE_CODE_GROUP` and `UCR_PART` columns are unpopulated |
 
 ### 5. Crash Records (Vision Zero)
@@ -65,7 +90,7 @@ Last updated: **2026-04-08**. All URLs, record counts, column names, and API res
 | Key columns | `dispatch_ts` (timestamp), `lat`, `long`, `mode_type` (mv/ped/bike) |
 | Format | CSV |
 | Data period | 2015-01-01 to 2025-12-31 |
-| Used for | Nighttime safety context |
+| Used for | **Downloaded but not rendered.** `data/safety/crashes.geojson` is still produced by `scripts/download_safety.py` but the night layer now uses the violent-crime subset of #4 instead. |
 | Verified | 2026-04-08. Record count confirmed |
 
 ### 6. Food Establishments (Active Licenses)
@@ -77,7 +102,7 @@ Last updated: **2026-04-08**. All URLs, record counts, column names, and API res
 | Key columns | `businessname`, `address`, `latitude`, `longitude` |
 | Format | CSV |
 | Data period | Active licenses |
-| Used for | Nighttime activity markers |
+| Used for | **Downloaded but not rendered in the time-slider.** Boston's license dataset does not carry operating hours, so the time-slider uses OSM POIs (#32) instead for time-aware venue markers. Retained in `data/safety/food_establishments.csv` for the retired standalone night map and as a fallback data source. |
 | Verified | 2026-04-08. 3,207 at time of check |
 
 ### 7. Flood Complaints (311)
@@ -388,6 +413,38 @@ Last updated: **2026-04-08**. All URLs, record counts, column names, and API res
 | Format | Shapefile (325MB .shp uncompressed) |
 | Note | Boston ArcGIS FEMA endpoint (#21) provides same data via GeoJSON API, easier to integrate |
 | Verified | 2026-04-08. Downloaded and inspected. Record count and fields confirmed |
+
+---
+
+## OpenStreetMap (Overpass API)
+
+### 32. OSM Amenity POIs with `opening_hours`
+
+| Field | Value |
+| --- | --- |
+| API | Overpass QL via `https://overpass-api.de/api/interpreter` |
+| Auth | None |
+| Records | ~760 inside INITIAL_BBOX that carry an `opening_hours` tag (about half of POIs in the target area) |
+| Key tags | `amenity` in {restaurant, bar, cafe, fast_food, pub, nightclub}, `opening_hours`, `name` |
+| Format | JSON (Overpass) → GeoJSON FeatureCollection |
+| Data period | Single snapshot at download time. See README "Snapshot caveat" for the weekday-pattern accuracy note |
+| Used for | **Shipped.** Time-gated green venue dots in night mode. The browser parses each `opening_hours` tag with `opening_hours.js` and toggles marker visibility against the slider's (date, time) |
+| Script | `scripts/download_osm_pois.py` writes `data/osm/pois.geojson` |
+| Verified | 2026-04-21. Record count in-bbox confirmed against the shipped artifact |
+
+### 33. OSM Water Polygons
+
+| Field | Value |
+| --- | --- |
+| API | Overpass QL via `https://overpass-api.de/api/interpreter` |
+| Auth | None |
+| Records | 175 features inside INITIAL_BBOX |
+| Key tags | `natural=water`, `waterway=riverbank`, `waterway=river` |
+| Format | JSON (Overpass) → GeoJSON FeatureCollection |
+| Used for | **Shipped as build-time mask.** `scripts/clip_trees_by_water.py` subtracts the water union from the tree-canopy GeoJSON so the canopy layer never extends over the Charles, Fort Point Channel, or the harbor. Not loaded by the browser |
+| Script | `scripts/download_water.py` writes `data/water/water.geojson` |
+| Known gap | Spot-check of Charles River centerline points shows only 1 of 7 lands inside the current water union because the Overpass query misses some multi-polygon relations. Open follow-up in `TODO.md`: broaden the query and re-stitch relation outers |
+| Verified | 2026-04-21. Record count in-bbox confirmed |
 
 ---
 

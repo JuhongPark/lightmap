@@ -1,6 +1,22 @@
 # Time Slider Plan
 
+> Status: Phase 1 landed. Phase 2 not pursued — Phase 1 covered every shipping requirement. This file preserves the rationale; what actually shipped is documented in `project.md`.
+
 Related: [Prototype Plan](prototype-plan.md), [Deploy Size Trim Plan](deploy-size-trim-plan.md), [Render Optimization Plan](render-optimization-plan.md), [Project Description](project.md)
+
+## Outcome
+
+Phase 1 shipped as `docs/prototype_timeslider.html` — the single production artifact. Free date picker, per-date sun-position lookup baked at build time, client-side day/night blend crossfade, live Open-Meteo weather + UV per date. Total payload ~27 MB at 100% scale, dominated by per-crown tree canopy polygons.
+
+Phase 2 ("full client-side sun + shadow computation, continuous minute-level slider, no bake") was not started. The Phase 1 artifact satisfied every proposal goal and the presentation demo. Phase 2 remains a future direction if continuous scrubbing or past-date accuracy beyond pre-baked slots becomes a requirement.
+
+### Closed decisions (captured for history)
+
+1. Phase 1 scope — accepted. Static pre-bake shipped.
+2. Pre-bake step — hourly for build-time sun tables, free-minute slider on the browser side.
+3. Pre-bake date — free date picker, not fixed. Browser recomputes shadow transforms per frame from the baked sun table.
+4. Date picker — visible and functional in Phase 1 (original plan was to hide or disable it).
+5. Scale for the demo — 100% with `INITIAL_BBOX` pre-filter. No scale reduction needed.
 
 ## Goal
 
@@ -106,8 +122,4 @@ Option C. Ship an MVP by the presentation deadline, then upgrade.
 
 ## Decision points to close before implementing
 
-1. **Phase 1 scope**: accept the MVP path, or delay in order to ship full Phase 2 later?
-2. **Pre-bake step**: hourly (12 frames, ~44 MB viewport-filtered) or half-hourly (24 frames, ~88 MB)?
-3. **Pre-bake date**: today-by-default at build, fixed summer solstice for photogenic shadows, or a flag?
-4. **Date picker in Phase 1**: hide, or show disabled to tease Phase 2?
-5. **Scale for the demo**: 100% (needs size trimming), 50%, or 1%? Affects storage budget directly.
+Resolved. See "Closed decisions" near the top of this file.

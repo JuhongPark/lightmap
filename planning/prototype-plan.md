@@ -1,13 +1,14 @@
 # LightMap Prototype Implementation Plan
 
+> Status: landed. Steps 1-3 shipped as the folium static-HTML prototype. Step 4 (FastAPI + MapLibre) was dropped in favor of the static time-slider path (see `time-slider-plan.md`). Step 5 shipped as the night-mode violent-crime pins (see `extensions-plan.md` Phase 3).
+
 ## Rough Roadmap
 
 1. ~~1 each: Shadow + Night validation~~ (done)
 2. ~~1% - 100% scale-up~~ (done)
 3. ~~Prototype enhancement: UI, dual map, time animation, tests~~ (done)
-4. Interactive app: FastAPI backend + MapLibre frontend
-5. Safety incident data overlay (crime heatmap)
-6. Presentation video
+4. ~~Interactive app: FastAPI backend + MapLibre frontend~~ — dropped. Superseded by the static-HTML time slider (`time-slider-plan.md`).
+5. ~~Safety incident data overlay (crime heatmap)~~ — shipped as violent-crime red-diamond pins in night mode (`extensions-plan.md` Phase 3).
 
 ---
 
@@ -123,23 +124,16 @@ Done:
 - Data vintage shown in info panels
 - README tech stack corrected to match actual implementation
 
-## 5. Next Steps
+## 5. Next Steps (historical outcome)
 
-### Interactive app (FastAPI + MapLibre)
-- FastAPI backend with `/api/shadows?time=...` endpoint
-- MapLibre GL JS frontend replacing folium
-- Real-time time slider (user-controlled, not pre-baked)
-- Day/night auto-switch based on solar elevation
-- Click-to-inspect with richer panels
-- About panel with full data attribution
+### Interactive app (FastAPI + MapLibre) — dropped
 
-### Additional data layers
-- Safety incident data overlay (Cambridge Socrata: `xuad-73uj`)
-- Tree canopy shade (144K polygons, Cambridge TopoJSON)
+Not pursued. The folium + Leaflet static HTML hit every listed goal (user-controlled time slider, day/night auto-switch, click-to-inspect) without adding a runtime server. See `tech-research.md` "Researched but Not Used" for the FastAPI + MapLibre deferral rationale. The interactive time slider shipped instead (see `time-slider-plan.md`).
 
-### Presentation
-- Record demo video covering: dual map, time animation, click-to-inspect
-- Voiceover explaining shadow engine and data pipeline
+### Additional data layers — landed
+
+- Safety incident data overlay: shipped as Boston violent-crime red-diamond pins in night mode. Cambridge crime was researched but not integrated because the Boston subset already covers the slider's `INITIAL_BBOX`. See `extensions-plan.md` Phase 3.
+- Tree canopy shade: shipped as per-crown polygons for Cambridge 2018 + Boston 2019-2024, projected along the sun angle same as buildings. See `extensions-plan.md` Phase 1.
 
 ## URL Corrections (for future reference)
 

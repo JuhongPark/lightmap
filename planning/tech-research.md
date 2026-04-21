@@ -1,65 +1,61 @@
 # Technology Research
 
-Last updated: **2026-04-08**.
+Initial research: **2026-04-08**. Final tech stack revised: **2026-04-21**.
 
-## Tech Stack
+## Tech Stack (as shipped)
+
+The shipped product is a single static HTML file. No server runtime.
 
 | Layer | Technology | Version | Purpose |
 | --- | --- | --- | --- |
-| Backend | Python | 3.12 | Runtime (supported until 2028. 3.14 is latest but 3.12 is stable) |
-| Backend | FastAPI | >=0.135 | Web framework, API server |
-| Backend | uvicorn | >=0.42 | ASGI server |
-| Backend | httpx | >=0.28 | HTTP client for weather API calls |
+| Build runtime | Python | >=3.12 | Offline pipeline. Requires >=3.11 transitively via pandas/numpy |
 | Shadow engine | pvlib | >=0.15 | Sun position (NREL Solar Position Algorithm) |
-| Shadow engine | Shapely | >=2.1 | Geometric projection, polygon union |
-| Data processing | GeoPandas | >=1.1 | Bulk spatial data processing |
-| Data processing | pandas | >=3.0 | Data manipulation, CSV parsing (requires Python >=3.11) |
-| Data processing | numpy | >=2.4 | Numerical computation (requires Python >=3.11) |
-| Frontend | MapLibre GL JS | 4.7.1 | WebGL map rendering (v5.x available, evaluate upgrade) |
-| Frontend | vanilla JavaScript | -- | UI logic, no framework |
-| Base tiles | CARTO Positron | -- | Daytime light base map |
-| Base tiles | CARTO Dark Matter | -- | Nighttime dark base map |
-| Timezone | ZoneInfo (stdlib) | -- | Boston time (US/Eastern) for time slider |
-| Prototype | folium | >=0.20 | Initial static map (replaced by MapLibre) |
+| Shadow engine | Shapely | >=2.1 | Geometric projection, polygon union, WKB batch decode |
+| Shadow engine (100% path) | PostgreSQL + PostGIS | 16 / 3.4 | Parallel projection as a SQL query. Optional, auto-detected at build |
+| Data processing | pandas | >=3.0 | CSV parsing, tabular prep |
+| Data processing | numpy | >=2.4 | Backs shapely / pvlib ufuncs |
+| Raster coverage | rasterio | >=1.5 | Shadow coverage area via rasterization (v7e in `optimization-plan.md`) |
+| Download | httpx | >=0.28 | HTTP client for data ingestion scripts |
+| Map emitter | folium | >=0.20 | Generates the final Leaflet HTML at build time |
+| Browser renderer | Leaflet (via folium) | 1.9.x | 2D map, canvas overlay, tile layers |
+| Browser helper | opening_hours.js | latest CDN | Parses OSM `opening_hours` tags for venue time-gating |
+| Browser helper | Open-Meteo | -- | Live weather + UV fetch per slider date, no auth |
+| Base tiles | CARTO Positron | -- | Daytime basemap |
+| Base tiles | CARTO Dark Matter | -- | Nighttime basemap |
+| Timezone | ZoneInfo (stdlib) | -- | Boston time (US/Eastern) for slider |
+| DB driver | psycopg2-binary | >=2.9 | Only used when PostGIS is available |
 
 ### Version Notes
 
-- **pvlib >=0.15** and **folium >=0.20**: Only one release satisfies each constraint (0.15.0, 0.20.0). Consider relaxing if stability is a concern.
-- **FastAPI >=0.135** and **httpx >=0.28**: Minimum is very close to the latest release. Tight constraint.
-- **pandas >=3.0** and **numpy >=2.4**: These dropped Python 3.10 support. The project effectively requires Python >=3.11.
-- **MapLibre GL JS 4.7.1**: Last release in the v4.x line. v5.22.0 is the latest (released 2026-04-03). APIs have evolved between v4 and v5. Evaluate whether to upgrade.
+- **pvlib >=0.15** and **folium >=0.20**: only one release satisfies each constraint (0.15.0, 0.20.0). Relax if stability becomes an issue.
+- **pandas >=3.0** and **numpy >=2.4**: dropped Python 3.10 support. The project effectively requires Python >=3.11.
+- **PostGIS is optional.** Build auto-detects the container. Set `LIGHTMAP_NO_POSTGIS=1` to force the pure Python fallback. The fallback produces identical output at measurable but tolerable cost at 100% scale.
 
-## Technology Decisions
+## Technology Decisions (as shipped)
 
-### MapLibre GL JS over Mapbox GL JS
+### Static HTML over FastAPI + MapLibre
 
-MapLibre GL JS is an open-source fork of Mapbox GL JS (BSD 3-Clause), created after Mapbox switched to a non-OSS license in December 2020. No API key required. Handles 46K building polygons + 80K streetlight heatmap via WebGL.
+Early research planned a FastAPI backend serving `/api/shadows` to a MapLibre GL JS frontend. During the prototype phase the folium + Leaflet static HTML hit every functional target (interactive time slider, layer toggles, click-to-inspect, day/night auto-switch) without the operational cost of hosting a server. We kept static HTML as the shipping format. FastAPI + MapLibre GL JS is noted as a future consideration in "Researched but Not Used" below.
 
-Note: MapLibre was originally API-compatible with Mapbox GL JS at v1.x, but the APIs have diverged significantly since then. Not a drop-in replacement for current Mapbox versions.
+### folium emitter over hand-rolled Leaflet
 
-CDN verified:
-- `https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js` (HTTP 200)
-- `https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js` (HTTP 200)
+folium produces well-formed Leaflet HTML with the right viewport clamp, base layers, and plugin wiring. Hand-rolling the same HTML would save no meaningful bytes and cost more maintenance. Custom JS is injected via `m.get_root().html.add_child(Element(...))` where folium's defaults are insufficient (custom slider, client-side sun position, day/night blend).
 
-### MapLibre GL JS over Leaflet
+### pvlib over suncalc.js
 
-Leaflet cannot efficiently render 46K building polygons. MapLibre uses WebGL with native vector tile support and built-in style switching.
-
-### FastAPI over Flask/Django
-
-FastAPI provides async support, is lightweight, and has built-in API docs. Flask would work but lacks async. Django is too heavyweight for a single-page map app.
-
-### pvlib over suncalc
-
-pvlib (Python) uses the NREL Solar Position Algorithm with high precision. suncalc (JavaScript, by mourner) is lighter but less precise. Server-side computation in Python makes pvlib the better fit.
+pvlib uses the NREL Solar Position Algorithm with high precision. The altitude + azimuth lookup is pre-computed at build time and baked into a JS table, so the browser never runs a sun-position library. suncalc.js stays in scope for a future client-side shadow engine if we ever revive Phase 2 of `time-slider-plan.md`.
 
 ### 2D geometric projection over 3D WebGL
 
-Shadowmap.org uses Three.js with GPU Shadow Mapping and 3D models. LightMap uses simpler 2D footprint extrusion (height x tan formula). Sufficient for top-down map view with much simpler implementation.
+Shadowmap.org uses Three.js with GPU Shadow Mapping and 3D models. LightMap uses simpler 2D footprint extrusion (`height * tan(altitude)` translate + union). Top-down map view does not benefit enough from 3D to justify the complexity.
 
-### folium replaced by FastAPI + MapLibre
+### Color-batched polygons over per-feature Leaflet objects
 
-folium generates static HTML with no real-time interaction. Cannot implement time slider, layer toggles, or dynamic shadow updates. Replaced in early prototyping.
+`L.GeoJSON` creates one `L.Polygon` per feature. At 123K features the per-object overhead dominates render time. Strategy r12 in `render-optimization-plan.md` batches shadows into ~4 `L.polygon` objects (one per color bin). r13 adds a ray-cast point-in-polygon click handler with a pre-computed bbox index so clickability is preserved. 2.7x faster than the per-feature path.
+
+### PostgreSQL + PostGIS as an optional fast path
+
+At 100% scale the Python shadow projection dominates build time. PostGIS with 8 parallel workers on an indexed table turns projection into a parallel SQL query, roughly halving wall time on a loaded host. Kept optional because the pure Python path is sufficient for demo and course submission.
 
 ### Vanilla JS over React/Vue
 
@@ -76,7 +72,7 @@ Single-page map app. No build step needed. Framework overhead not justified for 
 
 ### Tippecanoe + MBTiles
 
-Vector tile generation for large datasets. Not needed because MapLibre handles 46K GeoJSON polygons directly via WebGL without pre-tiling.
+Vector tile generation for large datasets. Not needed because the color-batched Leaflet renderer draws all 123K shadow features in a single canvas without pre-tiling.
 
 ### Draco Compression
 
@@ -98,9 +94,13 @@ Python project for generating shadow maps from OSM data (GitHub: `perliedman/sha
 
 Optional Phase 6 AI guide agent for conversational map insights. PyPI package `anthropic` (latest v0.92.0). Deferred to post-course. Not core functionality.
 
-### PostgreSQL + PostGIS
+### FastAPI + uvicorn backend
 
-Spatial database for faster shadow computation and indexing. Current Python in-memory computation with caching works for 46K buildings. PostGIS could enable faster computation at scale. Evaluation planned.
+Originally planned to serve `/api/shadows?time=...` and static GeoJSON endpoints. Dropped when the static-HTML prototype hit every functional target. Reintroducing a backend would unlock continuous-minute slider and any-date queries without pre-bake, but at hosting + deploy cost. Candidate for a future Phase 2 of `time-slider-plan.md`.
+
+### MapLibre GL JS frontend
+
+Paired with the FastAPI backend in the original plan. WebGL-based, handles large vector datasets natively. Not needed because Leaflet + color-batched polygons + canvas overlay render 123K shadow features in ~1.8 s on the final strategy (`render-optimization-plan.md` r13). Reintroduce if future features need 3D extrusion, vector tiles with feature state, or GPU-side styling.
 
 ## Competitor Technology Reference
 
@@ -146,4 +146,4 @@ Spatial database for faster shadow computation and indexing. Current Python in-m
 | CRS | Used By | Notes |
 | --- | --- | --- |
 | WGS84 (EPSG:4326) | All APIs, frontend, most datasets | Primary coordinate system |
-| EPSG:2249 (MA State Plane) | Boston tree canopy (TreeTops2019) | Must reproject to WGS84 |
+| EPSG:2249 (MA State Plane) | Boston tree canopy (BPDA TreeTops 2019-2024) | Reprojected to WGS84 inside `scripts/download_trees.py` via ogr2ogr |

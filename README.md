@@ -201,16 +201,16 @@ See [planning/optimization-plan.md](planning/optimization-plan.md) for the full 
 
 ## Documentation
 
-Documentation is being added. This section will be updated as new documents are created.
-
-- [Project Description](planning/project.md) -- Problem, solution plan, architecture, data sources.
-- [Data Catalog](planning/data-catalog.md) -- All datasets, APIs, and validation results.
-- [Technology Research](planning/tech-research.md) -- Tech stack, decisions, and competitor analysis.
+- [Project Description](planning/project.md) -- Shipped features, architecture, data sources, and as-mitigated risks.
+- [Data Catalog](planning/data-catalog.md) -- Every dataset researched. Labels which entries are shipped vs downloaded-but-unused vs researched-only.
+- [Technology Research](planning/tech-research.md) -- Shipped tech stack, design decisions, and competitor analysis. Notes why FastAPI + MapLibre were deferred.
+- [Prototype Plan](planning/prototype-plan.md) -- Historical roadmap for the 1-each through 100% scale prototype.
+- [Scale-Up Plan](planning/scaleup-plan.md) -- Per-stage targets and verification for the 1% through 100% scale-up.
+- [Time Slider Plan](planning/time-slider-plan.md) -- Phase 1 MVP that shipped. Phase 2 (full client-side shadow compute) left as future work.
+- [Extensions Plan](planning/extensions-plan.md) -- Tree canopy, weather, and safety-overlay rollout with per-phase outcomes.
 - [Optimization Plan](planning/optimization-plan.md) -- Step-by-step day pipeline optimization from 102s to roughly 12s of compute.
 - [Render Optimization Plan](planning/render-optimization-plan.md) -- r0 through r13 browser-side render strategies, from inline SVG that never loads to PNG-raster-primary with merged shadows.
 - [Deploy Size Trim Plan](planning/deploy-size-trim-plan.md) -- Coordinate precision trim, bucket merge, raster-primary rendering experiments.
-- [Time Slider Plan](planning/time-slider-plan.md) -- Phase 1 MVP (pre-baked) through Phase 2 live client-side sun and shadow compute.
-- [Extensions Plan](planning/extensions-plan.md) -- Tree canopy, weather, and safety-overlay rollout with per-layer scope and risks.
 - [Bench Protocol](planning/bench-protocol.md) -- Checklist and red flags for producing trustworthy bench numbers.
 - [Project TODOs](planning/TODO.md) -- Recently completed items and open follow-ups.
 - [Course Information](planning/course.md) -- MIT 1.001 course details and grading rubric.
