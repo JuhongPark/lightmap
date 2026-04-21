@@ -177,6 +177,14 @@ __marimo__/
 # Project data
 data/
 
+# Clipboard / editor paste strays in the repo root.
+# Anchored to the root so docs/screenshots/*.png remain tracked.
+/.codex
+/*.png
+
+# Temporary scratch sidecars that accumulate next to the real datasets
+data/_*.geojson
+
 # Generated shadow and building sidecars.
 # The raw *.geojson and *.png files ARE tracked so GitHub Pages can
 # serve them. The .gz files are dev-only (GitHub Pages applies its
