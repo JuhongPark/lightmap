@@ -81,8 +81,8 @@ CRIME_PATH = os.path.join(DATA_DIR, "safety", "crime.geojson")
 CRASH_PATH = os.path.join(DATA_DIR, "safety", "crashes.geojson")
 
 HEATMAP_GRADIENT = {
-    0.2: "#78350f", 0.4: "#d97706", 0.6: "#fbbf24",
-    0.8: "#fde68a", 1.0: "#ffffff",
+    0.2: "#854d0e", 0.4: "#ca8a04", 0.6: "#facc15",
+    0.8: "#fde047", 1.0: "#ffffff",
 }
 TIME_STEPS = [7, 9, 11, 13, 15, 17]
 
@@ -324,6 +324,49 @@ def load_safety_crashes():
             "mode": props.get("mode") or "",
         })
     print(f"  Crash records: {len(out)}")
+    return out
+
+
+# Offense-description keywords that define the "violent crime" (강력범죄)
+# bucket surfaced in the time-slider: murder/manslaughter, aggravated
+# assault, robbery, sexual offenses, and firearm/weapon involvement.
+# Simple assault is intentionally excluded — it dominates the feed with
+# verbal/minor incidents that would swamp the marker layer.
+_VIOLENT_KEYWORDS = (
+    "MURDER", "MANSLAUGHTER", "HOMICIDE",
+    "ASSAULT - AGGRAVATED",
+    "ROBBERY",
+    "RAPE", "SEXUAL",
+    "FIREARM", "WEAPON", "SHOOTING",
+)
+
+
+def load_violent_crime():
+    """Load violent-crime incidents as list of dicts with lat/lon/type.
+
+    Filters `data/safety/crime.geojson` down to the "강력범죄" set.
+    These are rendered as distinctive diamond markers (not a heatmap)
+    so individual incidents stand out on top of the streetlight glow.
+    """
+    if not os.path.exists(CRIME_PATH):
+        print(f"  Crime file not found: {CRIME_PATH}")
+        return []
+    with open(CRIME_PATH) as f:
+        gj = json.load(f)
+    out = []
+    for feat in gj.get("features", []):
+        coords = feat.get("geometry", {}).get("coordinates") or []
+        if len(coords) < 2:
+            continue
+        props = feat.get("properties") or {}
+        desc = (props.get("descript") or "").upper()
+        if not any(k in desc for k in _VIOLENT_KEYWORDS):
+            continue
+        out.append({
+            "lat": coords[1], "lon": coords[0],
+            "type": props.get("descript") or "",
+        })
+    print(f"  Violent crime incidents: {len(out)}")
     return out
 
 
@@ -993,9 +1036,9 @@ def build_time_slider_map(target_time, scale_pct):
     crime_points = [c for c in load_safety_crime()
                     if _in_bbox_latlon(c[0], c[1])]
     print(f"  Inside INITIAL_BBOX: {len(crime_points)} crime points")
-    crashes = [c for c in load_safety_crashes()
-               if _in_bbox_latlon(c["lat"], c["lon"])]
-    print(f"  Inside INITIAL_BBOX: {len(crashes)} crash records")
+    violent_crime = [c for c in load_violent_crime()
+                     if _in_bbox_latlon(c["lat"], c["lon"])]
+    print(f"  Inside INITIAL_BBOX: {len(violent_crime)} violent crime incidents")
 
     m = _create_base_map("CartoDB positron")
     _add_building_layer(m, building_data)
@@ -1047,20 +1090,31 @@ def build_time_slider_map(target_time, scale_pct):
         ).add_to(crime_group)
     crime_group.add_to(m)
 
+    # Reuse the crash_group variable + JS name because the slider's
+    # day→night toggle already wires that identifier. The layer now
+    # holds violent-crime markers instead of traffic crashes; the name
+    # in the UI control is the only thing the user sees.
     crash_group = folium.FeatureGroup(
-        name="Crashes (2yr)", show=False, control=False,
+        name="Violent crime (2yr)", show=False, control=False,
     )
-    for c in crashes:
+    for c in violent_crime:
         popup_html = (
             '<div style="font-family:sans-serif; font-size:12px;">'
-            f'<b>Crash</b><br>{c["mode"]}</div>'
+            f'<b>{c["type"]}</b></div>'
         )
-        folium.CircleMarker(
+        folium.Marker(
             location=[c["lat"], c["lon"]],
-            radius=3,
-            color="#fb923c", weight=1.2, opacity=0.6,
-            fill=True, fill_color="#f59e0b", fill_opacity=0.75,
-            popup=folium.Popup(popup_html, max_width=160),
+            icon=folium.DivIcon(
+                icon_size=(10, 10),
+                icon_anchor=(5, 5),
+                html=(
+                    '<div style="width:6px;height:6px;'
+                    'transform:rotate(45deg);'
+                    'background:#dc2626;'
+                    'box-shadow:0 0 3px rgba(0,0,0,0.7);"></div>'
+                ),
+            ),
+            popup=folium.Popup(popup_html, max_width=200),
         ).add_to(crash_group)
     crash_group.add_to(m)
 
@@ -1517,12 +1571,21 @@ def build_time_slider_map(target_time, scale_pct):
 
     var poiLayer = L.geoJson(null, {
       interactive: true,
-      renderer: shadowCanvas,
       pointToLayer: function(feat, latlng) {
-        return L.circleMarker(latlng, {
-          radius: 5,
-          color: "#fde68a", weight: 2, opacity: 0.55,
-          fillColor: "#fbbf24", fillOpacity: 0.9
+        // L.marker with DivIcon lands in markerPane (z-index 600),
+        // above both the streetlight heatmap (overlayPane) and the
+        // shadow canvas, so the green dot stays legible at night.
+        return L.marker(latlng, {
+          icon: L.divIcon({
+            className: 'lm-poi',
+            iconSize: [10, 10],
+            iconAnchor: [5, 5],
+            html: (
+              '<div style="width:6px;height:6px;border-radius:50%;'
+              + 'background:#22c55e;'
+              + 'box-shadow:0 0 3px rgba(0,0,0,0.7);"></div>'
+            )
+          })
         });
       },
       onEachFeature: function(feat, layer) {
@@ -1891,10 +1954,11 @@ def build_time_slider_map(target_time, scale_pct):
         state.playing = false;
         playIconEl.textContent = "\u25B6";
       } else {
+        // Fixed 1 s cadence regardless of per-slot render cost.
         state.playTimer = setInterval(function() {
           state.slot = (state.slot + 1) % 48;
           updateScene();
-        }, 400);
+        }, 1000);
         state.playing = true;
         playIconEl.textContent = "\u23F8";
       }
@@ -1940,8 +2004,8 @@ def build_time_slider_map(target_time, scale_pct):
         f"{building_count:,} buildings &middot; {trees_added:,} "
         "trees &middot; {:,} venues".format(len(osm_pois)),
         f'<span style="color:#94a3b8; font-size:11px;">Night safety: '
-        f'{len(crime_points):,} incidents + {len(crashes):,} crashes '
-        f'(2yr)</span>',
+        f'{len(crime_points):,} incidents + {len(violent_crime):,} '
+        f'violent-crime pins (2yr)</span>',
         '<span id="lm-weather" style="color:#64748b; font-size:11px;">'
         "Loading weather...</span>",
         '<span style="color:#64748b; font-size:11px;">'
