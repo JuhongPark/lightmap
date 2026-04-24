@@ -76,9 +76,18 @@ CAMBRIDGE_BUILDINGS_PATH = os.path.join(
 )
 BUILDINGS_DB_PATH = os.path.join(DATA_DIR, "buildings.db")
 OSM_POIS_PATH = os.path.join(DATA_DIR, "osm", "pois.geojson")
+MEDICAL_PATH = os.path.join(DATA_DIR, "osm", "medical.geojson")
+COOLING_PATH = os.path.join(DATA_DIR, "cooling", "cooling.geojson")
 TREES_PATH = os.path.join(DATA_DIR, "trees", "trees.geojson")
 CRIME_PATH = os.path.join(DATA_DIR, "safety", "crime.geojson")
 CRASH_PATH = os.path.join(DATA_DIR, "safety", "crashes.geojson")
+
+# Heat-response thresholds (matches scripts/download_medical.py scope).
+# Open-Meteo returns temperatures in Fahrenheit because the info panel
+# displays them that way. 32 C = 89.6 F, 33 C = 91.4 F.
+HEAT_TMAX_F = 89.6
+HEAT_APPARENT_F = 91.4
+HEAT_UV = 8
 
 HEATMAP_GRADIENT = {
     # Shifted stops + capped at warm yellow (no white). Below 0.35
@@ -438,6 +447,62 @@ def load_osm_pois():
             "hours": hours,
         })
     print(f"  OSM POIs with opening_hours: {len(out)}")
+    return out
+
+
+def load_medical():
+    """Load hospitals from OSM. Includes ALL hospitals in the dataset
+    (not just emergency=yes) so the map surfaces the full medical
+    footprint. The `is_er` flag distinguishes 24-hour emergency
+    departments at render time so they get a more prominent style.
+    """
+    if not os.path.exists(MEDICAL_PATH):
+        print(f"  Medical file not found: {MEDICAL_PATH}")
+        print(f"  Run scripts/download_medical.py to populate it")
+        return []
+    with open(MEDICAL_PATH) as f:
+        gj = json.load(f)
+    out = []
+    for feat in gj.get("features", []):
+        coords = feat.get("geometry", {}).get("coordinates") or []
+        if len(coords) < 2:
+            continue
+        props = feat.get("properties", {}) or {}
+        out.append({
+            "lon": coords[0], "lat": coords[1],
+            "name": props.get("name") or "Hospital",
+            "addr": props.get("addr_street") or "",
+            "phone": props.get("phone") or "",
+            "is_er": props.get("emergency") == "yes",
+        })
+    er_count = sum(1 for m in out if m["is_er"])
+    print(f"  Hospitals: {len(out)} ({er_count} with emergency=yes)")
+    return out
+
+
+def load_cooling_centers():
+    """Load cooling-center candidates from OSM proxy (libraries,
+    community centres, town halls). Visible only when heat advisory
+    is active. See scripts/download_cooling.py for the proxy rationale.
+    """
+    if not os.path.exists(COOLING_PATH):
+        print(f"  Cooling file not found: {COOLING_PATH}")
+        print(f"  Run scripts/download_cooling.py to populate it")
+        return []
+    with open(COOLING_PATH) as f:
+        gj = json.load(f)
+    out = []
+    for feat in gj.get("features", []):
+        coords = feat.get("geometry", {}).get("coordinates") or []
+        if len(coords) < 2:
+            continue
+        props = feat.get("properties", {}) or {}
+        out.append({
+            "lon": coords[0], "lat": coords[1],
+            "name": props.get("name") or (props.get("amenity") or "cooling"),
+            "amenity": props.get("amenity") or "",
+        })
+    print(f"  Cooling proxy centers: {len(out)}")
     return out
 
 
@@ -1037,6 +1102,16 @@ def build_time_slider_map(target_time, scale_pct):
                 if _in_bbox_latlon(p["lat"], p["lon"])]
     print(f"  Inside INITIAL_BBOX: {len(osm_pois)} POIs")
 
+    print("Loading medical (hospitals/ER)...")
+    medical = [m for m in load_medical()
+               if _in_bbox_latlon(m["lat"], m["lon"])]
+    print(f"  Inside INITIAL_BBOX: {len(medical)} hospitals")
+
+    print("Loading cooling proxy centers...")
+    cooling = [c for c in load_cooling_centers()
+               if _in_bbox_latlon(c["lat"], c["lon"])]
+    print(f"  Inside INITIAL_BBOX: {len(cooling)} cooling centers")
+
     print("Loading safety data...")
     crime_points = [c for c in load_safety_crime()
                     if _in_bbox_latlon(c[0], c[1])]
@@ -1050,6 +1125,12 @@ def build_time_slider_map(target_time, scale_pct):
     coords = [[round(lat, 5), round(lon, 5)] for lat, lon in coords]
     crime_points = [[round(lat, 5), round(lon, 5)] for lat, lon in crime_points]
     for p in osm_pois:
+        p["lat"] = round(p["lat"], 5)
+        p["lon"] = round(p["lon"], 5)
+    for p in medical:
+        p["lat"] = round(p["lat"], 5)
+        p["lon"] = round(p["lon"], 5)
+    for p in cooling:
         p["lat"] = round(p["lat"], 5)
         p["lon"] = round(p["lon"], 5)
     for v in violent_crime:
@@ -1384,6 +1465,11 @@ def build_time_slider_map(target_time, scale_pct):
 (function() {
   var BUILDINGS = __BUILDINGS__;
   var POIS = __POIS__;
+  var MEDICAL = __MEDICAL__;
+  var COOLING = __COOLING__;
+  var HEAT_TMAX_F = __HEAT_TMAX_F__;
+  var HEAT_APPARENT_F = __HEAT_APPARENT_F__;
+  var HEAT_UV = __HEAT_UV__;
   var LAT_CENTER = __CENTER_LAT__;
   var LON_CENTER = __CENTER_LON__;
   var INITIAL_DATE = "__INITIAL_DATE__";
@@ -1924,6 +2010,7 @@ def build_time_slider_map(target_time, scale_pct):
         + "?latitude=" + LAT_CENTER
         + "&longitude=" + LON_CENTER
         + "&daily=temperature_2m_max,temperature_2m_min,"
+        + "apparent_temperature_max,"
         + "uv_index_max,weather_code"
         + "&temperature_unit=fahrenheit"
         + "&timezone=America%2FNew_York"
@@ -1940,6 +2027,7 @@ def build_time_slider_map(target_time, scale_pct):
           var info = {
             tmax: d.temperature_2m_max && d.temperature_2m_max[0],
             tmin: d.temperature_2m_min && d.temperature_2m_min[0],
+            apparent: d.apparent_temperature_max && d.apparent_temperature_max[0],
             uv:   d.uv_index_max && d.uv_index_max[0],
             code: d.weather_code && d.weather_code[0]
           };
@@ -1955,6 +2043,7 @@ def build_time_slider_map(target_time, scale_pct):
       if (!weatherEl) return;
       if (w.tmax == null) {
         weatherEl.textContent = "Weather unavailable";
+        applyHeatState(false);
         return;
       }
       var icon = weatherIcon(w.code);
@@ -1963,6 +2052,82 @@ def build_time_slider_map(target_time, scale_pct):
         + Math.round(w.tmax) + "\u00B0F  \u00B7  UV "
         + (w.uv == null ? "?" : Math.round(w.uv));
       weatherEl.textContent = txt;
+      var heat = (w.tmax != null && w.tmax >= HEAT_TMAX_F)
+              || (w.apparent != null && w.apparent >= HEAT_APPARENT_F)
+              || (w.uv != null && w.uv >= HEAT_UV);
+      applyHeatState(heat);
+    }
+
+    // --- Heat-response overlay ---
+    // 3-step fallback: shade -> cooling -> ER. ER markers always
+    // visible (24h). Cooling markers appear only when weather fetch
+    // crosses HEAT_* thresholds. Info panel badge flags the state.
+    var erLayer = L.layerGroup();
+    for (var ei = 0; ei < MEDICAL.length; ei++) {
+      var er = MEDICAL[ei];
+      // Only 24-hour ERs render. Non-emergency hospitals are kept in
+      // the data but hidden — out of scope for the heat-response
+      // 3-step fallback (shade -> cooling -> ER).
+      if (!er.is_er) continue;
+      var erIcon = L.divIcon({
+        className: 'lm-er',
+        iconSize: [14, 14], iconAnchor: [7, 7],
+        html: '<div style="background:#dc2626;color:#fff;'
+            + 'border:1.5px solid #fff;border-radius:3px;'
+            + 'width:14px;height:14px;display:flex;'
+            + 'align-items:center;justify-content:center;'
+            + 'font-weight:900;font-size:11px;'
+            + 'box-shadow:0 1px 3px rgba(0,0,0,0.35);">+</div>'
+      });
+      var erM = L.marker([er.lat, er.lon], { icon: erIcon });
+      var erPop = '<div style="font-family:sans-serif;font-size:12px;'
+                + 'min-width:160px;"><b>' + (er.name || "Emergency Room")
+                + '</b><br><span style="color:#dc2626;font-weight:700;">'
+                + '24-hour ER</span>';
+      if (er.addr) erPop += '<br><span style="color:#64748b;">'
+                          + er.addr + '</span>';
+      if (er.phone) erPop += '<br><span style="color:#64748b;">'
+                           + er.phone + '</span>';
+      erPop += '</div>';
+      erM.bindPopup(erPop, { maxWidth: 220 });
+      erM.addTo(erLayer);
+    }
+    erLayer.addTo(map);
+
+    var coolingLayer = L.layerGroup();
+    for (var ci = 0; ci < COOLING.length; ci++) {
+      var cl = COOLING[ci];
+      var cIcon = L.divIcon({
+        className: 'lm-cooling',
+        iconSize: [12, 12], iconAnchor: [6, 6],
+        html: '<div style="background:#0891b2;border:2px solid #fff;'
+            + 'border-radius:50%;width:12px;height:12px;'
+            + 'box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div>'
+      });
+      var cM = L.marker([cl.lat, cl.lon], { icon: cIcon });
+      var cPop = '<div style="font-family:sans-serif;font-size:12px;'
+               + 'min-width:140px;"><b>' + (cl.name || "Cooling")
+               + '</b><br><span style="color:#0891b2;font-weight:700;">'
+               + 'Cooling option</span>'
+               + '<br><span style="color:#64748b;font-size:11px;">'
+               + cl.amenity + ' (OSM proxy)</span></div>';
+      cM.bindPopup(cPop, { maxWidth: 220 });
+      cM.addTo(coolingLayer);
+    }
+
+    var heatOn = false;
+    function applyHeatState(on) {
+      if (on === heatOn) return;
+      heatOn = !!on;
+      if (heatOn) {
+        if (!map.hasLayer(coolingLayer)) coolingLayer.addTo(map);
+      } else {
+        if (map.hasLayer(coolingLayer)) map.removeLayer(coolingLayer);
+      }
+      var badge = document.getElementById('lm-heat-badge');
+      if (badge) {
+        badge.style.display = heatOn ? 'inline-block' : 'none';
+      }
     }
 
     fetchWeather(state.dateStr);
@@ -2008,6 +2173,13 @@ def build_time_slider_map(target_time, scale_pct):
                  json.dumps(js_buildings, separators=(",", ":")))
         .replace("__POIS__",
                  json.dumps(osm_pois, separators=(",", ":")))
+        .replace("__MEDICAL__",
+                 json.dumps(medical, separators=(",", ":")))
+        .replace("__COOLING__",
+                 json.dumps(cooling, separators=(",", ":")))
+        .replace("__HEAT_TMAX_F__", str(HEAT_TMAX_F))
+        .replace("__HEAT_APPARENT_F__", str(HEAT_APPARENT_F))
+        .replace("__HEAT_UV__", str(HEAT_UV))
         .replace("__MAP_NAME__", m.get_name())
         .replace("__DARK_NAME__", dark_tiles.get_name())
         .replace("__STREET_NAME__", streetlight_group.get_name())
@@ -2034,7 +2206,13 @@ def build_time_slider_map(target_time, scale_pct):
         f'{len(crime_points):,} incidents + {len(violent_crime):,} '
         f'violent-crime pins (2yr)</span>',
         '<span id="lm-weather" style="color:#64748b; font-size:11px;">'
-        "Loading weather...</span>",
+        "Loading weather...</span>"
+        '<span id="lm-heat-badge" style="display:none; margin-left:8px; '
+        'background:#dc2626; color:#fff; padding:2px 8px; border-radius:10px; '
+        'font-size:10px; font-weight:700; letter-spacing:0.4px;">HEAT</span>',
+        '<span style="color:#94a3b8; font-size:11px;">Heat-response: '
+        f'{sum(1 for m in medical if m.get("is_er")):,} 24h ER + '
+        f'{len(cooling):,} cooling (proxy)</span>',
         '<span style="color:#64748b; font-size:11px;">'
         "Drag time or pick a date. Venues toggle on/off by their "
         "real opening hours.</span>",
