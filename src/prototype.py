@@ -1033,7 +1033,11 @@ def build_time_slider_map(target_time, scale_pct):
             h_ft = 0.0
         if h_ft <= 0:
             continue
-        ring = [[round(pt[0], 6), round(pt[1], 6)] for pt in rings[0]]
+        # Coord precision 6 -> 5 decimals (~1 m at 42 N). Height 0.01 m
+        # -> 1 m. Neither change is visible at zoom 15-18 and the HTML
+        # shrinks by ~25%. Shadows redraw faster because fewer digits
+        # serialize and fewer chars to parse on load.
+        ring = [[round(pt[0], 5), round(pt[1], 5)] for pt in rings[0]]
         xs = [pt[0] for pt in ring]
         ys = [pt[1] for pt in ring]
         bbox = [min(xs), min(ys), max(xs), max(ys)]
@@ -1042,7 +1046,7 @@ def build_time_slider_map(target_time, scale_pct):
                 bbox[3] < bbox_min_lat or bbox[1] > bbox_max_lat):
             bbox_rejected += 1
             continue
-        js_buildings.append([round(h_ft * 0.3048, 2), ring, bbox])
+        js_buildings.append([round(h_ft * 0.3048, 0), ring, bbox])
     print(f"  Inside INITIAL_BBOX: {len(js_buildings)} "
           f"(rejected {bbox_rejected})")
 
