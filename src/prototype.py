@@ -1888,12 +1888,12 @@ def build_time_slider_map(target_time, scale_pct):
         return L.marker(latlng, {
           icon: L.divIcon({
             className: 'lm-poi',
-            iconSize: [10, 10],
-            iconAnchor: [5, 5],
+            iconSize: [16, 16],
+            iconAnchor: [8, 8],
             html: (
-              '<div style="width:6px;height:6px;border-radius:50%;'
-              + 'background:#22c55e;'
-              + 'box-shadow:0 0 3px rgba(0,0,0,0.7);"></div>'
+              '<div style="width:11px;height:11px;border-radius:50%;'
+              + 'background:#facc15;border:1.5px solid #422006;'
+              + 'box-shadow:0 0 7px rgba(250,204,21,0.95);"></div>'
             )
           })
         });
