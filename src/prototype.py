@@ -81,8 +81,13 @@ CRIME_PATH = os.path.join(DATA_DIR, "safety", "crime.geojson")
 CRASH_PATH = os.path.join(DATA_DIR, "safety", "crashes.geojson")
 
 HEATMAP_GRADIENT = {
-    0.2: "#854d0e", 0.4: "#ca8a04", 0.6: "#facc15",
-    0.8: "#fde047", 1.0: "#ffffff",
+    # Shifted stops + capped at warm yellow (no white). Below 0.35
+    # density renders fully transparent so empty streets don't pick
+    # up a glow from the surrounding cluster. Top stop is light
+    # yellow rather than white so even the brightest cluster reads
+    # as a bright point, not a saturated washout.
+    0.35: "#854d0e", 0.55: "#ca8a04", 0.75: "#facc15",
+    1.0: "#fde047",
 }
 TIME_STEPS = [7, 9, 11, 13, 15, 17]
 
@@ -1062,8 +1067,19 @@ def build_time_slider_map(target_time, scale_pct):
         name="Streetlights", show=False, control=False,
     )
     if coords:
+        # max=5 raises the density threshold for "bright pixel" so only
+        # genuinely dense streetlight clusters glow yellow. Combined
+        # with the shifted HEATMAP_GRADIENT (transparent below 0.35
+        # density), the heatmap reads as actual streets instead of a
+        # citywide haze.
+        # max_zoom=14 (<= map's minZoom of 15) makes Leaflet.heat skip
+        # the zoom-based intensity scaling, so the heatmap reads the
+        # same brightness at every zoom level. Was max_zoom=18 which
+        # caused the heatmap to brighten toward zoom 18 (1/2^(18-zoom)
+        # divisor) — felt like the whole map lit up on zoom-in.
         HeatMap(
-            coords, radius=12, blur=20, gradient=HEATMAP_GRADIENT,
+            coords, radius=5, blur=8, max_zoom=14, max=5,
+            gradient=HEATMAP_GRADIENT,
         ).add_to(streetlight_group)
     streetlight_group.add_to(m)
 
@@ -1081,7 +1097,7 @@ def build_time_slider_map(target_time, scale_pct):
         # lets street geometry show through. min_opacity prevents a
         # pale-red wash from painting low-density areas.
         HeatMap(
-            crime_points, radius=6, blur=8, max_zoom=18,
+            crime_points, radius=6, blur=8, max_zoom=14,
             min_opacity=0.25,
             gradient={
                 0.35: "#450a0a", 0.6: "#991b1b",
