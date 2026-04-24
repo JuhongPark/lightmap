@@ -1045,6 +1045,17 @@ def build_time_slider_map(target_time, scale_pct):
                      if _in_bbox_latlon(c["lat"], c["lon"])]
     print(f"  Inside INITIAL_BBOX: {len(violent_crime)} violent crime incidents")
 
+    # Coord precision trim (~1 m) for everything that gets embedded.
+    # No feature is dropped — only the coordinate string is shorter.
+    coords = [[round(lat, 5), round(lon, 5)] for lat, lon in coords]
+    crime_points = [[round(lat, 5), round(lon, 5)] for lat, lon in crime_points]
+    for p in osm_pois:
+        p["lat"] = round(p["lat"], 5)
+        p["lon"] = round(p["lon"], 5)
+    for v in violent_crime:
+        v["lat"] = round(v["lat"], 5)
+        v["lon"] = round(v["lon"], 5)
+
     m = _create_base_map("CartoDB positron")
     _add_building_layer(m, building_data)
 
