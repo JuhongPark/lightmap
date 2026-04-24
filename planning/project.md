@@ -37,7 +37,15 @@ A client-side date + time picker scrubs through any date. Shadows sweep with the
 
 ### Weather and UV strip
 
-The info panel fetches `temperature_2m_max/min` and `uv_index_max` from Open-Meteo for the slider's selected date. Forecast API for today + next 16 days, archive API for historical dates. Fetched live from the browser. No auth.
+The info panel fetches `temperature_2m_max/min`, `apparent_temperature_max`, and `uv_index_max` from Open-Meteo for the slider's selected date. Forecast API for today + next 16 days, archive API for historical dates. Fetched live from the browser. No auth.
+
+### Heat-response overlay
+
+Three-step fallback for dangerous heat. Daytime shade (buildings + trees) is the default. When the live weather fetch crosses any of `tmax >= 89.6 F (32 C)`, `apparent_temperature_max >= 91.4 F (33 C)`, or `UV >= 8`, the info panel lights a red `HEAT` badge and a cooling-center layer (libraries, community centres, town halls from OSM, the proxy the City of Boston opens during heat emergencies) appears on the map. 24-hour ER markers stay on at all times so the third fallback is always reachable.
+
+### No-data mask
+
+The INITIAL_BBOX is divided into a 25x36 grid (~220 m x ~205 m cells). Cells with no buildings get a translucent dark fill so the viewer can see where the dataset ends instead of treating empty ground as "no activity." All point layers (crime, ER, venue, cooling, streetlight) are filtered server-side against the same grid so the masked area is cleanly empty rather than sprinkled with orphan dots. Interior empty cells fully surrounded by buildings (parks, plazas, parking lots) are flood-filled as covered so only the outer data boundary is masked.
 
 ## Shipped Architecture
 
@@ -66,8 +74,9 @@ docs/buildings*.geojson.gz
 1. **Static HTML over client-server.** The original proposal called for FastAPI + MapLibre GL JS. That path was dropped after the folium + Leaflet prototype hit all functional targets at 100% scale. No server avoids hosting cost, deploy complexity, and the "what runs when the demo grader opens it in 6 months" problem. See `tech-research.md` for the deferral rationale.
 2. **Shadow projection as a build-time step with PostGIS fallback.** `src/shadow/compute.py` runs in pure Python for 1%-50% scales. `src/shadow/postgis_compute.py` parallelizes the projection as a SQL query for the 100% build. PostGIS auto-detects at build time; set `LIGHTMAP_NO_POSTGIS=1` to force pure Python.
 3. **Pre-computed shadow PNG + deferred vector fetch** (render strategy r13 in `render-optimization-plan.md`). PNG flashes first for fast LCP, then the vector layer streams in for interactive click.
-4. **INITIAL_BBOX hard cutoff.** Every dataset is filtered to the Boston + Cambridge core bbox before serialization. Keeps `prototype_timeslider.html` at ~27 MB even with per-crown tree canopy bundled in.
-5. **Coordinate arrays, not GeoJSON, for streetlights.** Flat `[lat, lon]` pairs inside a JS array. Cheaper than `Feature[]` for 80K heatmap points.
+4. **INITIAL_BBOX hard cutoff.** Every dataset is filtered to the Boston + Cambridge core bbox before serialization.
+5. **Tree canopy as a baked PNG overlay, not embedded polygons.** ~59K per-crown polygons were rasterized into a single ~760 KB `trees_canopy.png` image. The browser paints one bitmap on pan/zoom instead of tens of thousands of canvas polygons, and the shipped HTML dropped from ~27 MB to ~15 MB.
+6. **Coordinate arrays, not GeoJSON, for streetlights.** Flat `[lat, lon]` pairs inside a JS array. Cheaper than `Feature[]` for 80K heatmap points.
 
 ## Data Sources (shipped)
 
@@ -81,7 +90,9 @@ docs/buildings*.geojson.gz
 | OSM water | 175 features | OpenStreetMap via Overpass | Mask so tree canopy never floats over water |
 | OSM amenity POIs with `opening_hours` | 760 | OpenStreetMap via Overpass | Night-mode venue dots |
 | Boston violent crime (last 2 years, night hours) | ~830 | data.boston.gov CKAN | Night-mode red-diamond pins |
-| Open-Meteo weather + UV | 1 record per slider date | Open-Meteo API | Info-panel strip (live fetch) |
+| OSM hospitals (`amenity=hospital` plus `amenity=clinic` with `emergency=yes`) | 16 | OpenStreetMap via Overpass | 24-hour ER markers (`emergency=yes` subset) for the heat-response fallback |
+| OSM cooling proxy (`amenity=library`, `community_centre`, `townhall`) | ~136 | OpenStreetMap via Overpass | Cooling-center markers, shown only when HEAT threshold is active |
+| Open-Meteo weather + UV | 1 record per slider date | Open-Meteo API | Info-panel strip (live fetch) and HEAT-threshold trigger (tmax, apparent_temperature_max, UV) |
 
 Full catalog with fields, verification dates, and unused datasets: `data-catalog.md`.
 
@@ -93,4 +104,4 @@ Full catalog with fields, verification dates, and unused datasets: `data-catalog
 | Shadow compute at 123K buildings | Build takes ~12 s wall on a loaded host. | PostGIS parallel projection + STRtree coverage + WKB batch decode. See `optimization-plan.md`. |
 | 123K polygons killing browser render | Time-to-interactive ~1.8 s at 100% scale. | Color-batched single `L.polygon` per color + point-in-polygon click handler + PNG preview. See `render-optimization-plan.md`. |
 | GitHub Pages deploy size | 9.48 MB gzipped total. | `INITIAL_BBOX` pre-filter + 3 m geometric simplification + 5-decimal coordinate precision. See `deploy-size-trim-plan.md`. |
-| 27 MB single HTML from bundled tree canopy | Still under GitHub Pages limits; open follow-up in `TODO.md`. | Per-crown polygons kept for accurate boundary. Further trim is tracked, not blocking. |
+| 27 MB single HTML from bundled tree canopy | Resolved: baked the canopy into a ~760 KB PNG overlay, so the shipped HTML is ~15 MB. | PNG preserves the canopy boundary at ~1.85 m/pixel inside `INITIAL_BBOX`. Further trim candidates tracked in `TODO.md`. |

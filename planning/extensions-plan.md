@@ -8,9 +8,12 @@ Related: [Project Description](project.md), [Prototype Plan](prototype-plan.md),
 
 | Phase | Status | Shipped as |
 | --- | --- | --- |
-| 1. Tree canopy | Landed | Projected per-crown shadows. Cambridge 2018 TopoJSON + Boston 2019-2024 BPDA TreeTops, streamed via `ogr2ogr`, simplified ~2 m, height-clamped 1.5-40 m, water-clipped via `scripts/clip_trees_by_water.py`. |
-| 2. Weather / UV | Landed | Live Open-Meteo fetch in the slider info panel. Forecast API for today + next 16 days, archive API for historical dates. |
+| 1. Tree canopy | Landed (later refactored) | Originally projected per-crown shadows (Cambridge 2018 TopoJSON + Boston 2019-2024 BPDA TreeTops, streamed via `ogr2ogr`, simplified ~2 m, height-clamped 1.5-40 m, water-clipped via `scripts/clip_trees_by_water.py`). Later swapped to a single baked `docs/trees_canopy.png` overlay for render cost and payload size — see Phase 4 for the rationale. |
+| 2. Weather / UV | Landed | Live Open-Meteo fetch in the slider info panel. Forecast API for today + next 16 days, archive API for historical dates. Also feeds `apparent_temperature_max` into the Phase 4 heat trigger. |
 | 3. Safety overlay | Landed (partial scope) | Night-mode red-diamond violent-crime pins (murder, aggravated assault, robbery, sexual offenses, firearm, weapon). Heatmap approach was explored then dropped for the pin approach. Crashes downloaded but not rendered. Cambridge crime not integrated. |
+| 4. Heat-response overlay | Landed | 24-hour ER markers (OSM `emergency=yes` subset) plus cooling-center markers (OSM proxy: libraries, community centres, town halls). Cooling layer toggles on when the live weather fetch crosses `tmax >= 89.6 F` / `apparent_max >= 91.4 F` / `UV >= 8`. Info panel shows a red `HEAT` badge while active. `scripts/download_medical.py` and `scripts/download_cooling.py` populate the sidecars. |
+| 5. Tree canopy raster swap | Landed | Replaced ~59K per-crown canvas polygons with a single baked `docs/trees_canopy.png` overlay rendered at ~1.85 m/pixel. Cut the shipped HTML from ~27 MB to ~15 MB and removed the per-tick canopy paint cost. |
+| 6. No-data mask | Landed | 25x36 grid over INITIAL_BBOX. Cells without buildings get a translucent dark fill, and every point layer (crime, ER, venue, cooling, streetlight) is pre-filtered server-side against the same grid. Interior empty cells are flood-filled as covered so only the outer boundary is masked. |
 
 ## Goal
 

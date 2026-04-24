@@ -51,11 +51,13 @@ The shadow engine computes sun position (pvlib) and projects each building footp
 | **Weather + UV (Open-Meteo)** | 1 daily record per slider date | [Open-Meteo API](https://open-meteo.com/) | Info panel temperature range + max UV for the slider's currently selected date. Free and no auth. Fetched live from the browser: forecast API for today-to-future-16-days, archive API for historical dates. |
 | **Boston crime incidents (last 2 years, night hours)** | ~19K inside viewport | [data.boston.gov CKAN](https://data.boston.gov/dataset/crime-incident-reports-august-2015-to-date-source-new-system) | Night-only safety heatmap. Aggregated, not live. Filtered to hours 18-05 so the map shows the pattern people actually encounter when walking home. |
 | **Boston crime incidents -- violent subset (last 2 years)** | ~830 inside viewport | Filtered from the crime dataset above | Red diamond pins on the night layer. Murder, aggravated assault, robbery, sexual offenses, firearm and weapon incidents. Click to see the offense description. |
+| **OSM hospitals (emergency rooms)** | 16 inside viewport (9 tagged `emergency=yes`) | [OpenStreetMap via Overpass API](https://overpass-turbo.eu/) | 24-hour ER markers for the heat-response fallback. Filtered to `emergency=yes` at render time so only true 24h facilities show. |
+| **OSM cooling proxy (libraries, community centres, town halls)** | ~136 inside viewport | [OpenStreetMap via Overpass API](https://overpass-turbo.eu/) | Cooling-center markers. Visible only when the live Open-Meteo fetch crosses a heat threshold (`tmax >= 89.6 F` or `apparent_max >= 91.4 F` or `UV >= 8`). Boston opens these during heat emergencies. |
 | **OpenStreetMap water polygons** | 175 features inside viewport | [OpenStreetMap via Overpass API](https://overpass-turbo.eu/) | Mask used by `scripts/clip_trees_by_water.py` so the tree-canopy layer never extends over the Charles, Fort Point Channel, or the harbor. |
 
 ### Time-slider data scope
 
-The interactive time slider embeds only the Boston + Cambridge core (a bbox roughly covering MIT, central Cambridge, Back Bay, and downtown Boston). Data outside this bbox is not loaded. The shipped HTML is ~27 MB at 100% scale — the bulk comes from the per-crown tree-canopy polygons, which trade some file size for accurate canopy boundaries. See `src/render/strategies.py` `INITIAL_BBOX` for the exact coordinates.
+The interactive time slider embeds only the Boston + Cambridge core (a bbox roughly covering MIT, central Cambridge, Back Bay, and downtown Boston). Data outside this bbox is not loaded. The shipped HTML is ~15 MB at 100% scale. The tree canopy ships as a single ~760 KB baked PNG overlay (`docs/trees_canopy.png`) rather than per-crown polygons, which keeps the HTML small and removes the per-tick canvas paint cost for ~59K crowns. See `src/render/strategies.py` `INITIAL_BBOX` for the exact coordinates.
 
 ### How OpenStreetMap powers the venue time-gating
 
@@ -114,6 +116,8 @@ The time-slider adds four more datasets. Pull them with separate scripts so the 
 .venv/bin/python scripts/download_safety.py
 .venv/bin/python scripts/download_water.py
 .venv/bin/python scripts/clip_trees_by_water.py
+.venv/bin/python scripts/download_medical.py
+.venv/bin/python scripts/download_cooling.py
 ```
 
 | File | Size | Source |
@@ -123,6 +127,8 @@ The time-slider adds four more datasets. Pull them with separate scripts so the 
 | `data/water/water.geojson` | ~350 KB | OpenStreetMap via Overpass API (`natural=water`, `waterway=riverbank|river`) |
 | `data/safety/crime.geojson` | ~3 MB | Boston data.boston.gov CKAN (last 2 years, night hours, INITIAL_BBOX filtered) |
 | `data/safety/crashes.geojson` | ~220 KB | Boston data.boston.gov CKAN (last 2 years, INITIAL_BBOX filtered). Still downloaded but no longer rendered — the night layer now uses the violent-crime subset of `crime.geojson` instead. |
+| `data/osm/medical.geojson` | ~5 KB | OpenStreetMap via Overpass API (`amenity=hospital` and `amenity=clinic` with `emergency=yes`, INITIAL_BBOX filtered) |
+| `data/cooling/cooling.geojson` | ~36 KB | OpenStreetMap via Overpass API (`amenity=library`, `community_centre`, `townhall`, INITIAL_BBOX filtered) |
 
 `clip_trees_by_water.py` is a post-processing step that subtracts the water union from `trees.geojson` in place. Run it after every `download_trees.py --force` so the canopy layer never floats over water.
 
@@ -142,7 +148,7 @@ The time-slider is the single production artifact. Build it with:
 .venv/bin/python src/prototype.py --time-slider --out prototype_timeslider.html --scale 100
 ```
 
-Opens `docs/prototype_timeslider.html` in your browser. During the day, shadows (buildings + per-crown tree canopy) move with the sun. After sunset the basemap fades dark, the streetlight heatmap switches on as a bright-yellow glow, OSM venues turn on one by one based on their real `opening_hours` tag, and violent-crime red-diamond pins appear on top. Weather and UV for the selected date are fetched live from Open-Meteo. Auto-play advances one slot per second.
+Opens `docs/prototype_timeslider.html` in your browser. During the day, building shadows move with the sun and a static green tree-canopy overlay fills in the rest of the shade. After sunset the basemap fades dark, the streetlight heatmap switches on as a bright-yellow glow, OSM venues turn on one by one based on their real `opening_hours` tag, and violent-crime red-diamond pins appear on top. Weather and UV for the selected date are fetched live from Open-Meteo. When the day's `tmax`, apparent temperature, or UV crosses the heat threshold, a red HEAT badge appears and cooling-center markers join the always-visible 24h ER markers. Auto-play advances one slot per second.
 
 Available flags:
 
