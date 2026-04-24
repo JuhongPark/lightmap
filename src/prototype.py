@@ -1166,15 +1166,15 @@ def build_time_slider_map(target_time, scale_pct):
                 if _in_bbox_latlon(p["lat"], p["lon"])]
     print(f"  Inside INITIAL_BBOX: {len(osm_pois)} POIs")
 
-    print("Loading medical (hospitals/ER)...")
+    print("Loading emergency rooms...")
     medical = [m for m in load_medical()
                if _in_bbox_latlon(m["lat"], m["lon"])]
-    print(f"  Inside INITIAL_BBOX: {len(medical)} hospitals")
+    print(f"  Inside INITIAL_BBOX: {len(medical)} ERs")
 
-    print("Loading cooling proxy centers...")
+    print("Loading cooling centers (proxy)...")
     cooling = [c for c in load_cooling_centers()
                if _in_bbox_latlon(c["lat"], c["lon"])]
-    print(f"  Inside INITIAL_BBOX: {len(cooling)} cooling centers")
+    print(f"  Inside INITIAL_BBOX: {len(cooling)} cooling")
 
     print("Loading safety data...")
     crime_points = [c for c in load_safety_crime()
@@ -1183,6 +1183,98 @@ def build_time_slider_map(target_time, scale_pct):
     violent_crime = [c for c in load_violent_crime()
                      if _in_bbox_latlon(c["lat"], c["lon"])]
     print(f"  Inside INITIAL_BBOX: {len(violent_crime)} violent crime incidents")
+
+    # ----- Building-coverage mask -----
+    # Areas inside INITIAL_BBOX that have no building data are masked
+    # out visually AND filtered from every point-based layer. The user
+    # should see no crime, ER, venue, cooling, or streetlight info on
+    # ground we cannot verify. Trees stay because they are geographic
+    # features, not user-activity data.
+    print("Building coverage mask:")
+    GRID_LAT_STEPS = 25  # ~220 m per cell at 42.36 N
+    GRID_LON_STEPS = 36  # ~205 m per cell
+    cell_lat_size = (bbox_max_lat - bbox_min_lat) / GRID_LAT_STEPS
+    cell_lon_size = (bbox_max_lon - bbox_min_lon) / GRID_LON_STEPS
+
+    def _cell_of(lat, lon):
+        cy = int((lat - bbox_min_lat) / cell_lat_size)
+        cx = int((lon - bbox_min_lon) / cell_lon_size)
+        if cy < 0 or cy >= GRID_LAT_STEPS or cx < 0 or cx >= GRID_LON_STEPS:
+            return None
+        return (cx, cy)
+
+    covered = set()
+    for _b in js_buildings:
+        for _pt in _b[1]:
+            _c = _cell_of(_pt[1], _pt[0])
+            if _c is not None:
+                covered.add(_c)
+    total_cells = GRID_LAT_STEPS * GRID_LON_STEPS
+    print(f"  Covered cells: {len(covered)}/{total_cells}")
+
+    # Only the OUTER empty region gets masked. Interior empty cells
+    # (parks, plazas, parking lots fully surrounded by buildings) are
+    # treated as covered so the mask traces just the edge of the city
+    # data, not every internal hole. Flood-fill from the bbox border
+    # through 4-connected empty cells.
+    edge_empty = set()
+    queue = []
+    for _cy in range(GRID_LAT_STEPS):
+        for _cx in range(GRID_LON_STEPS):
+            on_edge = (_cx == 0 or _cx == GRID_LON_STEPS - 1
+                       or _cy == 0 or _cy == GRID_LAT_STEPS - 1)
+            if on_edge and (_cx, _cy) not in covered:
+                edge_empty.add((_cx, _cy))
+                queue.append((_cx, _cy))
+    while queue:
+        cx, cy = queue.pop()
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            ncx, ncy = cx + dx, cy + dy
+            if not (0 <= ncx < GRID_LON_STEPS and 0 <= ncy < GRID_LAT_STEPS):
+                continue
+            if (ncx, ncy) in covered or (ncx, ncy) in edge_empty:
+                continue
+            edge_empty.add((ncx, ncy))
+            queue.append((ncx, ncy))
+    interior_holes = (total_cells - len(covered)) - len(edge_empty)
+    print(f"  Outer empty cells: {len(edge_empty)}")
+    print(f"  Interior empty (treated as covered): {interior_holes}")
+
+    from shapely.geometry import box as _shbox, mapping as _shmap
+    from shapely.ops import unary_union as _shunion
+
+    _empty = []
+    for (_cx, _cy) in edge_empty:
+        _s = bbox_min_lat + _cy * cell_lat_size
+        _n = _s + cell_lat_size
+        _w = bbox_min_lon + _cx * cell_lon_size
+        _e = _w + cell_lon_size
+        _empty.append(_shbox(_w, _s, _e, _n))
+    if _empty:
+        _merged = _shunion(_empty)
+        mask_geojson = _shmap(_merged)
+    else:
+        mask_geojson = None
+
+    def _in_cov(lat, lon):
+        _c = _cell_of(lat, lon)
+        return _c is not None and _c not in edge_empty
+
+    _before = (len(coords), len(osm_pois), len(medical), len(cooling),
+               len(crime_points), len(violent_crime))
+    coords = [c for c in coords if _in_cov(c[0], c[1])]
+    osm_pois = [p for p in osm_pois if _in_cov(p["lat"], p["lon"])]
+    medical = [m_ for m_ in medical if _in_cov(m_["lat"], m_["lon"])]
+    cooling = [c for c in cooling if _in_cov(c["lat"], c["lon"])]
+    crime_points = [c for c in crime_points if _in_cov(c[0], c[1])]
+    violent_crime = [c for c in violent_crime if _in_cov(c["lat"], c["lon"])]
+    print(f"  After mask filter:")
+    print(f"    streetlights {_before[0]} -> {len(coords)}")
+    print(f"    POIs {_before[1]} -> {len(osm_pois)}")
+    print(f"    medical {_before[2]} -> {len(medical)}")
+    print(f"    cooling {_before[3]} -> {len(cooling)}")
+    print(f"    crime points {_before[4]} -> {len(crime_points)}")
+    print(f"    violent crime {_before[5]} -> {len(violent_crime)}")
 
     # Coord precision trim (~1 m) for everything that gets embedded.
     # No feature is dropped — only the coordinate string is shorter.
@@ -1533,6 +1625,7 @@ def build_time_slider_map(target_time, scale_pct):
   var TREES_BBOX = __TREES_BBOX__;
   var MEDICAL = __MEDICAL__;
   var COOLING = __COOLING__;
+  var MASK_GEOJSON = __MASK_GEOJSON__;
   var HEAT_TMAX_F = __HEAT_TMAX_F__;
   var HEAT_APPARENT_F = __HEAT_APPARENT_F__;
   var HEAT_UV = __HEAT_UV__;
@@ -1728,6 +1821,12 @@ def build_time_slider_map(target_time, scale_pct):
       style: shadowStyle
     }).addTo(map);
 
+    // Static-layer canvas. Used by the no-data mask. Trees no longer
+    // live here — they ship as a single PNG overlay (see below) so the
+    // browser only paints one bitmap instead of ~59K canvas polygons,
+    // which is what was making pan/zoom feel slow.
+    var staticCanvas = L.canvas({ padding: 1.0 });
+
     // Tree canopy as a baked PNG overlay. One image draw on pan/zoom
     // versus ~59K polygon paints. Mild pixelation at zoom 18 is OK —
     // tree canopy is auxiliary and has soft edges by nature.
@@ -1737,6 +1836,24 @@ def build_time_slider_map(target_time, scale_pct):
       { interactive: false, opacity: 1, pane: 'overlayPane' }
     );
     // tree layer is added/removed by renderShadows based on altDeg
+
+    // No-data mask. Cells that contain no buildings get a translucent
+    // dark fill so users can immediately tell where the data ends. All
+    // point-based layers (crime, ER, venue, cooling, streetlight) are
+    // also pre-filtered server-side to drop anything inside these
+    // cells, so the masked area is cleanly empty.
+    if (MASK_GEOJSON) {
+      L.geoJson(MASK_GEOJSON, {
+        interactive: false,
+        renderer: staticCanvas,
+        style: function() {
+          return {
+            fillColor: '#1d4ed8', color: '#1d4ed8',
+            weight: 0, fillOpacity: 0.62, opacity: 0
+          };
+        }
+      }).addTo(map);
+    }
 
     // OSM POIs with opening_hours. Each entry gets its hours string
     // parsed once by opening_hours.js. At render time the parsed
@@ -2258,6 +2375,8 @@ def build_time_slider_map(target_time, scale_pct):
         .replace("__TREES_PNG_URL__", _trees_png_relpath)
         .replace("__TREES_BBOX__",
                  json.dumps(trees_png_bbox, separators=(",", ":")))
+        .replace("__MASK_GEOJSON__",
+                 json.dumps(mask_geojson, separators=(",", ":")) if mask_geojson else "null")
         .replace("__MEDICAL__",
                  json.dumps(medical, separators=(",", ":")))
         .replace("__COOLING__",
