@@ -1046,18 +1046,51 @@ def build_time_slider_map(target_time, scale_pct):
     print(f"  Inside INITIAL_BBOX: {len(js_buildings)} "
           f"(rejected {bbox_rejected})")
 
-    # Tree canopies are packed into the same per-tick canvas as
-    # building shadows, but marked with kind "t" so the projection
-    # step is skipped (the canopy itself represents the shade area,
-    # no sun-angle transform needed). This preserves the existing
-    # viewport-culling path and the single-canvas render pipeline,
-    # both of which are required to keep the tick cost bounded at
-    # 100% scale.
+    # Tree canopies render as a static green canopy overlay, NOT as
+    # projected shadows. The canopy footprint already represents the
+    # shaded area under the tree. Removing per-tick projection cuts
+    # ~32% off the per-tick shadow compute (was ~123K buildings + ~59K
+    # trees, now ~123K buildings only) and lets the tree layer paint
+    # once on day-start instead of every slot. Trade-off: we lose the
+    # cast-shadow extension that follows the sun. Acceptable per the
+    # speed budget.
     print("Loading tree canopy...")
     trees = load_trees()
-    trees_added = 0
+    # Additional simplify on top of the 2 m tolerance already applied in
+    # download_trees.py. 5 m tolerance at zoom 15-18 is imperceptible but
+    # cuts tree vertex count roughly in half, which drops the static
+    # canvas paint cost proportionally. Tree COUNT is preserved — we only
+    # thin the outlines, never drop an individual tree.
+    from shapely.geometry import Polygon as _Poly
+    # preserve_topology=True guarantees the polygon never collapses to
+    # empty, so we can use a relatively aggressive 6 m tolerance without
+    # losing a single canopy. Falls back to raw ring on any shapely
+    # error so the no-tree-dropped invariant holds even on edge cases.
+    _TREE_SIMPLIFY_TOL = 5.4e-5  # ~6 m in degrees at 42 N
+    trees_static = []
+    _tree_verts_before = 0
+    _tree_verts_after = 0
+    _tree_simplified = 0
+    _tree_kept_raw = 0
     for t in trees:
-        ring = [[round(pt[0], 6), round(pt[1], 6)] for pt in t["ring"]]
+        raw = t["ring"]
+        if len(raw) < 4:
+            continue
+        _tree_verts_before += len(raw)
+        ring = None
+        try:
+            p = _Poly(raw).simplify(_TREE_SIMPLIFY_TOL, preserve_topology=True)
+            if p.geom_type == "MultiPolygon":
+                p = max(p.geoms, key=lambda g: g.area)
+            if not p.is_empty and p.exterior:
+                ring = [[round(x, 5), round(y, 5)] for x, y in p.exterior.coords]
+                _tree_simplified += 1
+        except Exception:
+            pass
+        if ring is None:
+            ring = [[round(pt[0], 5), round(pt[1], 5)] for pt in raw]
+            _tree_kept_raw += 1
+        _tree_verts_after += len(ring)
         xs = [pt[0] for pt in ring]
         ys = [pt[1] for pt in ring]
         fminx, fmaxx = min(xs), max(xs)
@@ -1065,10 +1098,41 @@ def build_time_slider_map(target_time, scale_pct):
         if (fmaxx < bbox_min_lon or fminx > bbox_max_lon or
                 fmaxy < bbox_min_lat or fminy > bbox_max_lat):
             continue
-        bbox = [fminx, fminy, fmaxx, fmaxy]
-        js_buildings.append([round(t["h_m"], 2), ring, bbox, "t"])
-        trees_added += 1
-    print(f"  Tree canopies merged into shadow list: {trees_added}")
+        trees_static.append(ring)
+    print(f"  Tree canopies kept as static overlay: {len(trees_static)}")
+    print(f"    simplified: {_tree_simplified}, preserved raw (small): {_tree_kept_raw}")
+    if _tree_verts_before:
+        print(f"  Tree vertices: {_tree_verts_before} -> {_tree_verts_after} "
+              f"({100 * _tree_verts_after / _tree_verts_before:.0f}%)")
+
+    # Bake the tree-canopy rings into a single PNG sidecar. The browser
+    # then renders ONE image overlay instead of ~59K canvas polygons —
+    # the static-canvas paint cost on pan/zoom drops effectively to zero.
+    # Slight pixelation at zoom 18 is acceptable per the user: trees are
+    # an auxiliary layer and have soft edges anyway.
+    from PIL import Image as _PILImage, ImageDraw as _PILDraw
+    _PNG_W, _PNG_H = 4000, 2972  # ~1.85 m/pixel across INITIAL_BBOX
+    _bbox_w = bbox_max_lon - bbox_min_lon
+    _bbox_h = bbox_max_lat - bbox_min_lat
+    _trees_png_relpath = "trees_canopy.png"
+    _trees_png_path = os.path.join(OUT_DIR, _trees_png_relpath)
+    _img = _PILImage.new("RGBA", (_PNG_W, _PNG_H), (0, 0, 0, 0))
+    _draw = _PILDraw.Draw(_img, "RGBA")
+    _fill = (21, 128, 61, int(0.32 * 255))  # green-700 at 32% opacity
+    for ring in trees_static:
+        if len(ring) < 3:
+            continue
+        _px = []
+        for pt in ring:
+            x = (pt[0] - bbox_min_lon) / _bbox_w * _PNG_W
+            y = (bbox_max_lat - pt[1]) / _bbox_h * _PNG_H
+            _px.append((x, y))
+        _draw.polygon(_px, fill=_fill)
+    os.makedirs(os.path.dirname(_trees_png_path), exist_ok=True)
+    _img.save(_trees_png_path, "PNG", optimize=True)
+    _png_kb = os.path.getsize(_trees_png_path) / 1024
+    print(f"  Tree canopy raster: docs/{_trees_png_relpath} ({_png_kb:.0f} KB)")
+    trees_png_bbox = [bbox_min_lat, bbox_min_lon, bbox_max_lat, bbox_max_lon]
 
     # Rebuild the building_data for folium's static building layer too,
     # so the base layer matches the shadow-engine footprint set.
@@ -1465,6 +1529,8 @@ def build_time_slider_map(target_time, scale_pct):
 (function() {
   var BUILDINGS = __BUILDINGS__;
   var POIS = __POIS__;
+  var TREES_PNG_URL = "__TREES_PNG_URL__";
+  var TREES_BBOX = __TREES_BBOX__;
   var MEDICAL = __MEDICAL__;
   var COOLING = __COOLING__;
   var HEAT_TMAX_F = __HEAT_TMAX_F__;
@@ -1662,6 +1728,16 @@ def build_time_slider_map(target_time, scale_pct):
       style: shadowStyle
     }).addTo(map);
 
+    // Tree canopy as a baked PNG overlay. One image draw on pan/zoom
+    // versus ~59K polygon paints. Mild pixelation at zoom 18 is OK —
+    // tree canopy is auxiliary and has soft edges by nature.
+    state.treeLayer = L.imageOverlay(
+      TREES_PNG_URL,
+      [[TREES_BBOX[0], TREES_BBOX[1]], [TREES_BBOX[2], TREES_BBOX[3]]],
+      { interactive: false, opacity: 1, pane: 'overlayPane' }
+    );
+    // tree layer is added/removed by renderShadows based on altDeg
+
     // OSM POIs with opening_hours. Each entry gets its hours string
     // parsed once by opening_hours.js. At render time the parsed
     // object answers open/closed for the slider's (date, time). We
@@ -1812,14 +1888,20 @@ def build_time_slider_map(target_time, scale_pct):
       // Keep shadows off until the sun is DAY_THRESHOLD above the
       // horizon. Below that angle shadow_length = height / tan(alt)
       // explodes and every building hits the 500 m cap, flooding the
-      // view with a uniform shadow wall. Tree canopies follow the
-      // same gate implicitly because they share this canvas layer.
+      // view with a uniform shadow wall. Static tree canopy follows
+      // the same gate so the night map stays dark and uncluttered.
       if (altDeg < DAY_THRESHOLD) {
         if (state.hadShadows) {
           state.shadowLayer.clearLayers();
           state.hadShadows = false;
         }
+        if (state.treeLayer && map.hasLayer(state.treeLayer)) {
+          map.removeLayer(state.treeLayer);
+        }
         return;
+      }
+      if (state.treeLayer && !map.hasLayer(state.treeLayer)) {
+        state.treeLayer.addTo(map);
       }
       state.shadowLayer.clearLayers();
       state.hadShadows = true;
@@ -2173,6 +2255,9 @@ def build_time_slider_map(target_time, scale_pct):
                  json.dumps(js_buildings, separators=(",", ":")))
         .replace("__POIS__",
                  json.dumps(osm_pois, separators=(",", ":")))
+        .replace("__TREES_PNG_URL__", _trees_png_relpath)
+        .replace("__TREES_BBOX__",
+                 json.dumps(trees_png_bbox, separators=(",", ":")))
         .replace("__MEDICAL__",
                  json.dumps(medical, separators=(",", ":")))
         .replace("__COOLING__",
@@ -2200,8 +2285,8 @@ def build_time_slider_map(target_time, scale_pct):
     _add_info_panel(m, [
         "<b>LightMap</b> &mdash; Time Slider",
         f'<span style="color:#64748b;">{date_str}</span>',
-        f"{building_count:,} buildings &middot; {trees_added:,} "
-        "trees &middot; {:,} venues".format(len(osm_pois)),
+        f"{building_count:,} buildings &middot; {len(trees_static):,} "
+        "trees (static) &middot; {:,} venues".format(len(osm_pois)),
         f'<span style="color:#94a3b8; font-size:11px;">Night safety: '
         f'{len(crime_points):,} incidents + {len(violent_crime):,} '
         f'violent-crime pins (2yr)</span>',
