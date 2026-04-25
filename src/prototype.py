@@ -588,6 +588,7 @@ def _load_buildings_and_shadows(scale_pct, target_time):
 
 def _create_base_map(
     tiles="CartoDB positron", *, prefer_canvas=True,
+    lock_zoom=False,
     min_lat=INITIAL_BBOX[0], max_lat=INITIAL_BBOX[2],
     min_lon=INITIAL_BBOX[1], max_lon=INITIAL_BBOX[3],
 ):
@@ -600,15 +601,23 @@ def _create_base_map(
     # Default pan bounds are INITIAL_BBOX (MIT + central Cambridge + the
     # Boston core) so day and night renderers share the same frame. A
     # caller can still pass wider bounds if a specific view needs them.
+    #
+    # lock_zoom=True pins the *minimum* zoom at zoom_start so the user
+    # cannot scroll out of the prepared frame while scrubbing the slider,
+    # but still allows zooming in (up to 18) for a closer look. Zoom
+    # interactions stay enabled in both modes.
+    zoom_start = 16
+    min_z = zoom_start if lock_zoom else 15
+    max_z = 18
     m = folium.Map(
-        location=MAP_CENTER, zoom_start=16, tiles=tiles,
+        location=MAP_CENTER, zoom_start=zoom_start, tiles=tiles,
         width="100%", height="100%",
         prefer_canvas=prefer_canvas,
         # min_zoom is 1 level below zoom_start so users can pull back
         # slightly for a wider overview but not so far that the shadow
         # redraw cost explodes. max_zoom matches what CartoDB Positron
         # and Dark Matter serve natively (18).
-        min_zoom=15, max_zoom=18,
+        min_zoom=min_z, max_zoom=max_z,
         min_lat=min_lat, max_lat=max_lat,
         min_lon=min_lon, max_lon=max_lon,
         max_bounds=True,
@@ -1244,21 +1253,10 @@ def build_time_slider_map(target_time, scale_pct):
     print(f"  Outer empty cells: {len(edge_empty)}")
     print(f"  Interior empty (treated as covered): {interior_holes}")
 
-    from shapely.geometry import box as _shbox, mapping as _shmap
-    from shapely.ops import unary_union as _shunion
-
-    _empty = []
-    for (_cx, _cy) in edge_empty:
-        _s = bbox_min_lat + _cy * cell_lat_size
-        _n = _s + cell_lat_size
-        _w = bbox_min_lon + _cx * cell_lon_size
-        _e = _w + cell_lon_size
-        _empty.append(_shbox(_w, _s, _e, _n))
-    if _empty:
-        _merged = _shunion(_empty)
-        mask_geojson = _shmap(_merged)
-    else:
-        mask_geojson = None
+    # Visual mask layer was dropped — the translucent fill read poorly.
+    # Coverage filtering below still suppresses point data on uncovered
+    # ground so we never show data we cannot verify.
+    mask_geojson = None
 
     def _in_cov(lat, lon):
         _c = _cell_of(lat, lon)
@@ -1297,7 +1295,7 @@ def build_time_slider_map(target_time, scale_pct):
         v["lat"] = round(v["lat"], 5)
         v["lon"] = round(v["lon"], 5)
 
-    m = _create_base_map("CartoDB positron")
+    m = _create_base_map("CartoDB positron", lock_zoom=True)
     _add_building_layer(m, building_data)
 
     # Dark Matter tiles overlay, hidden by default. JS toggles on at night.
@@ -1311,7 +1309,7 @@ def build_time_slider_map(target_time, scale_pct):
     dark_tiles = folium.TileLayer(
         "CartoDB dark_matter", name="Night tiles",
         overlay=True, control=False, show=False,
-        min_zoom=15, max_zoom=18,
+        min_zoom=16, max_zoom=18,
     )
     dark_tiles.add_to(m)
 
@@ -1606,7 +1604,7 @@ def build_time_slider_map(target_time, scale_pct):
     <div class="lm-sun-label" id="lm-sunset-label">--:--</div>
     <div class="lm-sun-marker" id="lm-sunrise-marker"></div>
     <div class="lm-sun-marker" id="lm-sunset-marker"></div>
-    <input type="range" id="lm-range" min="0" max="47" step="1" value="28">
+    <input type="range" id="lm-range" min="0" max="23" step="1" value="14">
   </div>
 </div>
 """
@@ -1629,7 +1627,6 @@ def build_time_slider_map(target_time, scale_pct):
   var TREES_BBOX = __TREES_BBOX__;
   var MEDICAL = __MEDICAL__;
   var COOLING = __COOLING__;
-  var MASK_GEOJSON = __MASK_GEOJSON__;
   var HEAT_TMAX_F = __HEAT_TMAX_F__;
   var HEAT_APPARENT_F = __HEAT_APPARENT_F__;
   var HEAT_UV = __HEAT_UV__;
@@ -1745,8 +1742,8 @@ def build_time_slider_map(target_time, scale_pct):
 
     function sunAt(dateStr, slot) {
       var p = parseDateStr(dateStr);
-      var hour = Math.floor(slot / 2);
-      var min = (slot % 2) * 30;
+      var hour = slot;
+      var min = 0;
       var d = bostonDate(p.y, p.m, p.d, hour, min);
       var pos = SunCalc.getPosition(d, LAT_CENTER, LON_CENTER);
       // SunCalc: azimuth measured from south, west-positive.
@@ -1825,12 +1822,6 @@ def build_time_slider_map(target_time, scale_pct):
       style: shadowStyle
     }).addTo(map);
 
-    // Static-layer canvas. Used by the no-data mask. Trees no longer
-    // live here — they ship as a single PNG overlay (see below) so the
-    // browser only paints one bitmap instead of ~59K canvas polygons,
-    // which is what was making pan/zoom feel slow.
-    var staticCanvas = L.canvas({ padding: 1.0 });
-
     // Tree canopy as a baked PNG overlay. One image draw on pan/zoom
     // versus ~59K polygon paints. Mild pixelation at zoom 18 is OK —
     // tree canopy is auxiliary and has soft edges by nature.
@@ -1840,24 +1831,6 @@ def build_time_slider_map(target_time, scale_pct):
       { interactive: false, opacity: 1, pane: 'overlayPane' }
     );
     // tree layer is added/removed by renderShadows based on altDeg
-
-    // No-data mask. Cells that contain no buildings get a translucent
-    // dark fill so users can immediately tell where the data ends. All
-    // point-based layers (crime, ER, venue, cooling, streetlight) are
-    // also pre-filtered server-side to drop anything inside these
-    // cells, so the masked area is cleanly empty.
-    if (MASK_GEOJSON) {
-      L.geoJson(MASK_GEOJSON, {
-        interactive: false,
-        renderer: staticCanvas,
-        style: function() {
-          return {
-            fillColor: '#1d4ed8', color: '#1d4ed8',
-            weight: 0, fillOpacity: 0.62, opacity: 0
-          };
-        }
-      }).addTo(map);
-    }
 
     // OSM POIs with opening_hours. Each entry gets its hours string
     // parsed once by opening_hours.js. At render time the parsed
@@ -1915,9 +1888,7 @@ def build_time_slider_map(target_time, scale_pct):
     // Boston wall-clock values regardless of the viewer's own timezone.
     function ohDate(dateStr, slot) {
       var p = parseDateStr(dateStr);
-      var hour = Math.floor(slot / 2);
-      var min = (slot % 2) * 30;
-      return new Date(p.y, p.m, p.d, hour, min, 0);
+      return new Date(p.y, p.m, p.d, slot, 0, 0);
     }
 
     // Cache the feature list per (date, slot) so repeat scrubs skip
@@ -1961,7 +1932,7 @@ def build_time_slider_map(target_time, scale_pct):
             }
           });
         }
-        if (poiCache.size >= 48) {
+        if (poiCache.size >= 24) {
           poiCache.delete(poiCache.keys().next().value);
         }
         poiCache.set(key, feats);
@@ -1976,7 +1947,7 @@ def build_time_slider_map(target_time, scale_pct):
     // loop entirely. Viewport changes invalidate the whole cache at
     // moveend because the culled building set differs.
     var shadowCache = new Map();
-    var CACHE_LIMIT = 48;
+    var CACHE_LIMIT = 24;
 
     function computeShadowFeats(altDeg, azDeg) {
       var cb = cullBounds();
@@ -2096,7 +2067,7 @@ def build_time_slider_map(target_time, scale_pct):
       if (!t.sunrise || isNaN(t.sunrise.getTime())) return;
       var off = bostonUtcOffset(p.y, p.m, p.d);
       // Convert UTC to Boston local hour/min so the slider mapping
-      // (slot = local hour * 2 + min/30) is consistent.
+      // (slot = local hour) is consistent.
       function localHm(dt) {
         var utcH = dt.getUTCHours() + (dt.getUTCMinutes() / 60);
         var localH = (utcH + off + 24) % 24;
@@ -2109,10 +2080,10 @@ def build_time_slider_map(target_time, scale_pct):
       var ss = localHm(t.sunset);
       var srFrac = sr[0] + sr[1] / 60;
       var ssFrac = ss[0] + ss[1] / 60;
-      // Slot 0..47 maps to hours 0..23.5. The slider thumb travels
-      // across the full track, so position 0% = hour 0, 100% = hour 23.5.
-      var pctSr = (srFrac / 23.5) * 100;
-      var pctSs = (ssFrac / 23.5) * 100;
+      // Slot 0..23 maps to hours 0..23. The slider thumb travels
+      // across the full track, so position 0% = hour 0, 100% = hour 23.
+      var pctSr = (srFrac / 23) * 100;
+      var pctSs = (ssFrac / 23) * 100;
       srMarker.style.left = pctSr + "%";
       ssMarker.style.left = pctSs + "%";
       srLabel.style.left = pctSr + "%";
@@ -2351,7 +2322,7 @@ def build_time_slider_map(target_time, scale_pct):
       } else {
         // Fixed 1 s cadence regardless of per-slot render cost.
         state.playTimer = setInterval(function() {
-          state.slot = (state.slot + 1) % 48;
+          state.slot = (state.slot + 1) % 24;
           updateScene();
         }, 1000);
         state.playing = true;
@@ -2379,8 +2350,6 @@ def build_time_slider_map(target_time, scale_pct):
         .replace("__TREES_PNG_URL__", _trees_png_relpath)
         .replace("__TREES_BBOX__",
                  json.dumps(trees_png_bbox, separators=(",", ":")))
-        .replace("__MASK_GEOJSON__",
-                 json.dumps(mask_geojson, separators=(",", ":")) if mask_geojson else "null")
         .replace("__MEDICAL__",
                  json.dumps(medical, separators=(",", ":")))
         .replace("__COOLING__",
