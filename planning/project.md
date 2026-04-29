@@ -23,17 +23,17 @@ The single production artifact is `docs/prototype_timeslider.html`. Every featur
 
 ### Daytime shadow map
 
-Sun position comes from pvlib (NREL Solar Position Algorithm). Each building footprint is translated along the opposite azimuth by `height / tan(altitude)` and unioned with the original, producing a 2D shadow polygon. Shadow color is mapped from building height. Tree canopy crowns are projected with the same sun angle and an assumed 10 m canopy height, so the daytime view combines building shade and tree shade in one pass.
+Sun position comes from pvlib in the Python shadow engine and SunCalc in the browser time-slider. Each building footprint is translated along the opposite azimuth by `height / tan(altitude)` and unioned with the original, producing a 2D shadow polygon. Shadow darkness is mapped from building height. Tree canopy crowns are baked into a static PNG shade overlay so the daytime view combines moving building shade with lightweight tree-canopy shade context.
 
 Coverage: 123K buildings with height (105K Boston + 18K Cambridge) and ~59K per-crown tree polygons inside `INITIAL_BBOX` (MIT, central Cambridge, Back Bay, downtown Boston).
 
 ### Nighttime brightness map
 
-After sunset the basemap fades from CARTO Positron to CARTO Dark Matter. 80K streetlights render as a pure-yellow heatmap. ~760 OSM venues (restaurants, bars, cafes) toggle visible based on their `opening_hours` tag via `opening_hours.js`. ~830 violent-crime red-diamond pins (last 2 years, night hours, INITIAL_BBOX) sit on top.
+After sunset the basemap fades from CARTO Positron to CARTO Dark Matter. 80K streetlights render as a pure-yellow heatmap. ~760 OSM venues (restaurants, bars, cafes) toggle visible based on their `opening_hours` tag via `opening_hours.js`. Historic incident records are kept as an optional reference overlay, not as the main night-mode claim.
 
 ### Time slider
 
-A client-side date + time picker scrubs through any date. Shadows sweep with the sun. Day/night transition triggers on solar altitude crossing `TWILIGHT_START = 0` and fully completes at `DAY_THRESHOLD = 15`. Auto-play advances at a fixed 1 s per slot cadence, independent of per-tick render cost.
+A client-side date + time picker scrubs through any date. Building shadows sweep with the sun. Day/night transition triggers on solar altitude crossing `TWILIGHT_START = 0` and fully completes at `DAY_THRESHOLD = 15`. Auto-play advances at a fixed 1 s per slot cadence, independent of per-tick render cost.
 
 ### Weather and UV strip
 
@@ -102,6 +102,7 @@ Full catalog with fields, verification dates, and unused datasets: `data-catalog
 | --- | --- | --- |
 | Data freshness (2010-2024 data) | Vintage shown in info panel. | Users see the data year. No live feed was ever promised. |
 | Shadow compute at 123K buildings | Build takes ~12 s wall on a loaded host. | PostGIS parallel projection + STRtree coverage + WKB batch decode. See `optimization-plan.md`. |
+| Time-slider redraw felt sluggish | Local smoke redraw now lands around ~40 ms for ~6.9K visible shadows. | Replaced per-tick `L.GeoJSON.addData` polygon rebuilding with a direct canvas layer that paints computed shadow rings. See `shadow-lightmap-roadmap.md`. |
 | 123K polygons killing browser render | Time-to-interactive ~1.8 s at 100% scale. | Color-batched single `L.polygon` per color + point-in-polygon click handler + PNG preview. See `render-optimization-plan.md`. |
 | GitHub Pages deploy size | 9.48 MB gzipped total. | `INITIAL_BBOX` pre-filter + 3 m geometric simplification + 5-decimal coordinate precision. See `deploy-size-trim-plan.md`. |
 | 27 MB single HTML from bundled tree canopy | Resolved: baked the canopy into a ~760 KB PNG overlay, so the shipped HTML is ~15 MB. | PNG preserves the canopy boundary at ~1.85 m/pixel inside `INITIAL_BBOX`. Further trim candidates tracked in `TODO.md`. |

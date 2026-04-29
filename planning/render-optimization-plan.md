@@ -482,6 +482,39 @@ Even with r9, these are not small:
   quick pass in headed Chrome, Firefox, and Safari is overdue before
   the final presentation.
 
+## Time-Slider Live Redraw Pass (2026-04-29)
+
+The r0-r13 history above focused on loading and rendering a precomputed
+shadow sidecar. The interactive time-slider has a different hot path: every
+hour change recomputes visible building shadows in the browser and redraws
+them.
+
+The slow version used a canvas-backed `L.GeoJSON` layer and called
+`clearLayers()` plus `addData()` every tick. Even with Leaflet canvas rendering,
+that still made Leaflet allocate thousands of polygon objects before it could
+draw. The math was cheap; object churn was the problem.
+
+The new version adds a small direct canvas layer inside `src/prototype.py`:
+
+- `computeShadowRings()` returns lightweight `[height, ring]` tuples.
+- `ShadowCanvasLayer.setShadows()` clears one canvas and fills rings directly.
+- `window.__lightmapTimeSlider` records `shadowComputeMs`, `shadowDrawMs`, and
+  `shadowRenderMs`.
+
+Local smoke result at 1280x800:
+
+```text
+time-slider shadows: 6921
+compute: 10.2 ms
+draw: 29.3 ms
+render total: 39.6 ms
+```
+
+Why it matters: the slider now behaves like an animation layer rather than a
+feature-layer rebuild. That matches the product: the moving ShadowMap is the
+primary experience, so the hot path should be geometry-to-pixels, not
+geometry-to-GeoJSON-to-Leaflet-objects-to-pixels.
+
 ## What we'd do next if pushing further
 
 1. Ship a binary (MessagePack or Protobuf) sidecar to eliminate JSON

@@ -49,6 +49,7 @@ class RenderResult:
     viewport: dict
     timings: dict = field(default_factory=dict)
     lightmap: dict = field(default_factory=dict)
+    time_slider: dict = field(default_factory=dict)
     console: list = field(default_factory=list)
     errors: list = field(default_factory=list)
     requests_failed: list = field(default_factory=list)
@@ -233,6 +234,8 @@ def run(url: str, label: str, viewport_w: int, viewport_h: int,
         # Pull the lightmap harness state in full.
         lightmap = page.evaluate("window.__lightmap || null")
         result.lightmap = lightmap or {}
+        time_slider = page.evaluate("window.__lightmapTimeSlider || null")
+        result.time_slider = time_slider or {}
 
         # Paint timings from the PerformanceObserver we installed before
         # navigation. LCP reflects the latest largest-contentful element
@@ -384,6 +387,16 @@ def print_summary(r: RenderResult) -> None:
             print(f"  parse+add:          {added - fe:.0f} ms")
         if added is not None:
             print(f"  shadows addedAt:    {added:.0f} ms (total from nav start)")
+    ts = r.time_slider or {}
+    if ts:
+        print(f"  time-slider shadows:{ts.get('shadowCount', 'n/a')} "
+              f"(cacheHit={ts.get('shadowCacheHit', 'n/a')})")
+        if ts.get("shadowComputeMs") is not None:
+            print(f"    compute:          {ts['shadowComputeMs']:.1f} ms")
+        if ts.get("shadowDrawMs") is not None:
+            print(f"    draw:             {ts['shadowDrawMs']:.1f} ms")
+        if ts.get("shadowRenderMs") is not None:
+            print(f"    render total:     {ts['shadowRenderMs']:.1f} ms")
     dom = r.dom_summary or {}
     if dom:
         print(f"  canvases:           {dom.get('canvas_count', 'n/a')}")

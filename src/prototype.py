@@ -385,12 +385,11 @@ def load_violent_crime():
 
 
 def load_trees():
-    """Load tree canopy polygons from the Cambridge GIS snapshot.
+    """Load tree canopy polygons for the static time-slider shade overlay.
 
     Each feature keeps its outer ring + a `height_m` property. The
-    time-slider shadow engine treats these as short buildings and
-    projects shadows from them the same way it does for real
-    buildings, so the shade layer includes tree shade automatically.
+    current time-slider rasterizes these crowns into one PNG overlay
+    instead of projecting them on every slider tick.
     """
     if not os.path.exists(TREES_PATH):
         print(f"  Tree canopy file not found: {TREES_PATH}")
@@ -1456,6 +1455,22 @@ def build_time_slider_map(target_time, scale_pct):
   #lm-date::-webkit-calendar-picker-indicator {
     cursor: pointer; opacity: 0.55;
   }
+  #lm-incidents-wrap {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    color: #64748b;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+  }
+  #lm-incidents {
+    width: 13px;
+    height: 13px;
+    margin: 0;
+    accent-color: #64748b;
+  }
   #lm-play {
     background: #f1f5f9;
     color: #1e293b;
@@ -1565,6 +1580,8 @@ def build_time_slider_map(target_time, scale_pct):
   #lm-slider-host.night #lm-date::-webkit-calendar-picker-indicator {
     filter: invert(0.8);
   }
+  #lm-slider-host.night #lm-incidents-wrap { color: #94a3b8; }
+  #lm-slider-host.night #lm-incidents { accent-color: #fbbf24; }
   #lm-slider-host.night #lm-play {
     background: #1e293b; color: #e2e8f0; border-color: #334155;
   }
@@ -1595,6 +1612,10 @@ def build_time_slider_map(target_time, scale_pct):
       <span id="lm-time">--:--</span>
     </div>
     <input type="date" id="lm-date" value="__INITIAL_DATE__">
+    <label id="lm-incidents-wrap" title="Show historic incident reference layer">
+      <input type="checkbox" id="lm-incidents">
+      <span>Incidents</span>
+    </label>
     <button id="lm-play" aria-label="Play or pause the time slider">
       <span id="lm-play-icon">\u25B6</span>
     </button>
@@ -1721,6 +1742,7 @@ def build_time_slider_map(target_time, scale_pct):
     var dateEl = document.getElementById("lm-date");
     var timeEl = document.getElementById("lm-time");
     var iconEl = document.getElementById("lm-mode-icon");
+    var incidentEl = document.getElementById("lm-incidents");
     var playEl = document.getElementById("lm-play");
     var playIconEl = document.getElementById("lm-play-icon");
     var srMarker = document.getElementById("lm-sunrise-marker");
@@ -1732,7 +1754,7 @@ def build_time_slider_map(target_time, scale_pct):
     var state = {
       dateStr: INITIAL_DATE, slot: parseInt(rangeEl.value, 10),
       playing: false, playTimer: null, shadowLayer: null,
-      hadShadows: false
+      hadShadows: false, incidentsOn: false
     };
 
     function parseDateStr(s) {
@@ -1788,39 +1810,78 @@ def build_time_slider_map(target_time, scale_pct):
       ];
     }
 
-    // Single canvas-backed shadow layer, constructed once. Each tick
-    // we clear + refill it via addData, which avoids the per-tick
-    // Leaflet bookkeeping of removing and re-registering a fresh
-    // L.GeoJSON from scratch. The explicit canvas renderer keeps the
-    // render path off SVG even when the map's preferCanvas default is
-    // shadowed by plugin layers.
-    var shadowCanvas = L.canvas({ padding: 0.5 });
-    var shadowStyle = function(f) {
-      // Tree shadows get a muted dark green so they read as foliage
-      // shade rather than a building casting — the tint mimics the
-      // way light filtered through leaves comes out slightly green.
-      // Opacity stays fixed at a softer level than buildings so tree
-      // shade layers under building shade rather than competing.
-      if (f.properties.kind === "t") {
-        return {
-          fillColor: "#1e3a2a", color: "#1e3a2a",
-          weight: 0, fillOpacity: 0.32, opacity: 0.32
-        };
+    // Direct canvas shadow layer. The older path rebuilt a GeoJSON
+    // layer on every tick, which forced Leaflet to allocate thousands
+    // of L.Polygon children. Here the shadow engine returns simple
+    // [height, ring] tuples and this layer fills them directly.
+    var ShadowCanvasLayer = L.Layer.extend({
+      initialize: function() {
+        this._shadows = [];
+      },
+      onAdd: function(map_) {
+        this._map = map_;
+        this._canvas = L.DomUtil.create(
+          "canvas", "leaflet-layer lm-shadow-canvas"
+        );
+        this._canvas.style.pointerEvents = "none";
+        this._ctx = this._canvas.getContext("2d");
+        map_.getPanes().overlayPane.appendChild(this._canvas);
+        map_.on("resize zoomend moveend", this._reset, this);
+        this._reset();
+      },
+      onRemove: function(map_) {
+        map_.off("resize zoomend moveend", this._reset, this);
+        if (this._canvas && this._canvas.parentNode) {
+          this._canvas.parentNode.removeChild(this._canvas);
+        }
+        this._canvas = null;
+        this._ctx = null;
+      },
+      clear: function() {
+        this._shadows = [];
+        return this._draw();
+      },
+      setShadows: function(shadows) {
+        this._shadows = shadows || [];
+        return this._draw();
+      },
+      _reset: function() {
+        if (!this._map || !this._canvas) return;
+        var size = this._map.getSize();
+        var topLeft = this._map.containerPointToLayerPoint([0, 0]);
+        L.DomUtil.setPosition(this._canvas, topLeft);
+        this._canvas.width = size.x;
+        this._canvas.height = size.y;
+        this._draw();
+      },
+      _fillForHeight: function(h) {
+        var op = Math.min(0.18 + (h / 60) * 0.22, 0.45);
+        return "rgba(15,23,42," + op.toFixed(3) + ")";
+      },
+      _draw: function() {
+        if (!this._ctx || !this._map) return 0;
+        var t0 = performance.now();
+        var ctx = this._ctx;
+        var size = this._map.getSize();
+        ctx.clearRect(0, 0, size.x, size.y);
+        for (var i = 0; i < this._shadows.length; i++) {
+          var item = this._shadows[i];
+          var ring = item[1];
+          if (!ring || ring.length < 3) continue;
+          ctx.beginPath();
+          for (var j = 0; j < ring.length; j++) {
+            var p = this._map.latLngToContainerPoint([ring[j][1], ring[j][0]]);
+            if (j === 0) ctx.moveTo(p.x, p.y);
+            else ctx.lineTo(p.x, p.y);
+          }
+          ctx.closePath();
+          ctx.fillStyle = this._fillForHeight(item[0]);
+          ctx.fill();
+        }
+        return performance.now() - t0;
       }
-      // Building shadows: dark slate, opacity scales with height so
-      // tall towers cast visually darker shade than short rows.
-      var h = f.properties.h;
-      var op = Math.min(0.18 + (h / 60) * 0.22, 0.45);
-      return {
-        fillColor: "#0f172a", color: "#0f172a",
-        weight: 0.2, fillOpacity: op, opacity: op
-      };
-    };
-    state.shadowLayer = L.geoJson(null, {
-      interactive: false,
-      renderer: shadowCanvas,
-      style: shadowStyle
-    }).addTo(map);
+    });
+    state.shadowLayer = new ShadowCanvasLayer().addTo(map);
 
     // Tree canopy as a baked PNG overlay. One image draw on pan/zoom
     // versus ~59K polygon paints. Mild pixelation at zoom 18 is OK —
@@ -1942,38 +2003,27 @@ def build_time_slider_map(target_time, scale_pct):
       });
     }
 
-    // Per-slot feature cache. Key = "YYYY-MM-DD:slot". Populated lazily
+    // Per-slot shadow cache. Key = "YYYY-MM-DD:slot". Populated lazily
     // on first visit to a slot; subsequent visits skip the convex-hull
     // loop entirely. Viewport changes invalidate the whole cache at
     // moveend because the culled building set differs.
     var shadowCache = new Map();
     var CACHE_LIMIT = 24;
 
-    function computeShadowFeats(altDeg, azDeg) {
+    function computeShadowRings(altDeg, azDeg) {
       var cb = cullBounds();
       var cullW = cb[0], cullS = cb[1], cullE = cb[2], cullN = cb[3];
-      var feats = [];
+      var shadows = [];
       for (var i = 0; i < BUILDINGS.length; i++) {
         var b = BUILDINGS[i];
         var bb = b[2];
         if (bb[2] < cullW || bb[0] > cullE ||
             bb[3] < cullS || bb[1] > cullN) continue;
-        // Same sun-projection path for buildings and tree patches —
-        // trees only differ in height (uniform 10 m) and kind, so
-        // their shadows come out shorter and cast in the same sun
-        // direction as buildings. This is what makes canopy shade
-        // read as a shadow rather than a flat green overlay.
         var hull = projectShadow(b[1], b[0], altDeg, azDeg);
         if (!hull || hull.length < 3) continue;
-        var ring = hull.slice();
-        ring.push(hull[0]);
-        feats.push({
-          type: "Feature",
-          geometry: { type: "Polygon", coordinates: [ring] },
-          properties: { h: b[0], kind: b[3] === "t" ? "t" : "b" }
-        });
+        shadows.push([b[0], hull]);
       }
-      return feats;
+      return shadows;
     }
 
     function renderShadows(altDeg, azDeg) {
@@ -1984,7 +2034,7 @@ def build_time_slider_map(target_time, scale_pct):
       // the same gate so the night map stays dark and uncluttered.
       if (altDeg < DAY_THRESHOLD) {
         if (state.hadShadows) {
-          state.shadowLayer.clearLayers();
+          state.shadowLayer.clear();
           state.hadShadows = false;
         }
         if (state.treeLayer && map.hasLayer(state.treeLayer)) {
@@ -1995,26 +2045,48 @@ def build_time_slider_map(target_time, scale_pct):
       if (state.treeLayer && !map.hasLayer(state.treeLayer)) {
         state.treeLayer.addTo(map);
       }
-      state.shadowLayer.clearLayers();
       state.hadShadows = true;
       var key = state.dateStr + ":" + state.slot;
-      var feats;
+      var shadows;
+      var t0 = performance.now();
+      var cacheHit = false;
       if (shadowCache.has(key)) {
-        feats = shadowCache.get(key);
+        shadows = shadowCache.get(key);
+        cacheHit = true;
         // LRU bump.
         shadowCache.delete(key);
-        shadowCache.set(key, feats);
+        shadowCache.set(key, shadows);
       } else {
-        feats = computeShadowFeats(altDeg, azDeg);
+        shadows = computeShadowRings(altDeg, azDeg);
         if (shadowCache.size >= CACHE_LIMIT) {
           var firstKey = shadowCache.keys().next().value;
           shadowCache.delete(firstKey);
         }
-        shadowCache.set(key, feats);
+        shadowCache.set(key, shadows);
       }
-      state.shadowLayer.addData({
-        type: "FeatureCollection", features: feats
-      });
+      var t1 = performance.now();
+      var drawMs = state.shadowLayer.setShadows(shadows);
+      var t2 = performance.now();
+      window.__lightmapTimeSlider = {
+        slot: state.slot,
+        date: state.dateStr,
+        shadowCount: shadows.length,
+        shadowCacheHit: cacheHit,
+        shadowComputeMs: t1 - t0,
+        shadowDrawMs: drawMs,
+        shadowRenderMs: t2 - t0
+      };
+    }
+
+    function syncIncidentLayers(nightMix) {
+      var showIncidents = state.incidentsOn && nightMix > 0.5;
+      if (showIncidents) {
+        if (!map.hasLayer(crime)) crime.addTo(map);
+        if (!map.hasLayer(crash)) crash.addTo(map);
+      } else {
+        if (map.hasLayer(crime)) map.removeLayer(crime);
+        if (map.hasLayer(crash)) map.removeLayer(crash);
+      }
     }
 
     function renderTheme(altDeg) {
@@ -2043,20 +2115,17 @@ def build_time_slider_map(target_time, scale_pct):
       // up with altitude -0.5 (roughly true sunrise/sunset) so the
       // slider color aligns with the marker position.
       //
-      // Same gate drives the night-only "safety context" overlays
-      // (crime heatmap + recent crash pins) so they appear and
-      // disappear together with the slider's moon icon.
+      // Incident history is a reference layer, not the point of the
+      // night experience. It only appears when the user explicitly
+      // asks for it, and still remains night-gated.
       if (nightMix > 0.5) {
         host.classList.add("night");
         iconEl.textContent = "\u263E";
-        if (!map.hasLayer(crime)) crime.addTo(map);
-        if (!map.hasLayer(crash)) crash.addTo(map);
       } else {
         host.classList.remove("night");
         iconEl.textContent = "\u2600";
-        if (map.hasLayer(crime)) map.removeLayer(crime);
-        if (map.hasLayer(crash)) map.removeLayer(crash);
       }
+      syncIncidentLayers(nightMix);
     }
 
     function updateSunMarkers() {
@@ -2120,6 +2189,14 @@ def build_time_slider_map(target_time, scale_pct):
       state.slot = parseInt(rangeEl.value, 10);
       updateScene();
     });
+
+    if (incidentEl) {
+      incidentEl.addEventListener("change", function() {
+        state.incidentsOn = !!incidentEl.checked;
+        var s = sunAt(state.dateStr, state.slot);
+        renderTheme(s.alt);
+      });
+    }
 
     dateEl.addEventListener("change", function() {
       if (!dateEl.value) return;
@@ -2379,9 +2456,9 @@ def build_time_slider_map(target_time, scale_pct):
         f'<span style="color:#64748b;">{date_str}</span>',
         f"{building_count:,} buildings &middot; {len(trees_static):,} "
         "trees (static) &middot; {:,} venues".format(len(osm_pois)),
-        f'<span style="color:#94a3b8; font-size:11px;">Night safety: '
+        f'<span style="color:#94a3b8; font-size:11px;">Incident reference: '
         f'{len(crime_points):,} incidents + {len(violent_crime):,} '
-        f'violent-crime pins (2yr)</span>',
+        f'violent-crime pins (2yr, optional)</span>',
         '<span id="lm-weather" style="color:#64748b; font-size:11px;">'
         "Loading weather...</span>"
         '<span id="lm-heat-badge" style="display:none; margin-left:8px; '
