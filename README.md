@@ -20,7 +20,7 @@ Built by **Juhong Park** (System Design and Management, MIT) as a term project f
 
 The shadow engine computes sun position (pvlib) and projects each building footprint along the opposite azimuth. The brightness map renders streetlight density as a heatmap. Both scale from a single building to the full dataset:
 
-| Data&nbsp;Ratio | Day | Night |
+| Data Ratio | Day | Night |
 | :--: | --- | --- |
 | 1 each | <img src="docs/screenshots/day_1each.png" width="360"> | <img src="docs/screenshots/night_1each.png" width="360"> |
 | 1% | <img src="docs/screenshots/day_1pct.png" width="360"> | <img src="docs/screenshots/night_1pct.png" width="360"> |
@@ -148,7 +148,7 @@ The time-slider is the single production artifact. Build it with:
 .venv/bin/python src/prototype.py --time-slider --out prototype_timeslider.html --scale 100
 ```
 
-Opens `docs/prototype_timeslider.html` in your browser. During the day, building shadows move with the sun and a static green tree-canopy overlay fills in the rest of the shade. After sunset the basemap fades dark, the streetlight heatmap switches on as a bright-yellow glow, and OSM venues turn on one by one based on their real `opening_hours` tag. Historic incident records can be toggled on as reference context. Weather and UV for the selected date are fetched live from Open-Meteo. When the day's `tmax`, apparent temperature, or UV crosses the heat threshold, a red HEAT badge appears and cooling-center markers join the always-visible 24h ER markers. Auto-play advances one slot per second.
+Opens `docs/prototype_timeslider.html` in your browser. On load, the slider resets to the current Boston date and the nearest past hourly slot. During the day, building shadows move with the sun and a static green tree-canopy overlay fills in the rest of the shade. Click a point to ask when the local 17 m check ring is covered by building shadow or open to direct sun. After sunset the basemap fades dark, the streetlight heatmap switches on as a bright-yellow glow, and OSM venues turn on one by one based on their real `opening_hours` tag. Historic incident records can be toggled on as reference context. Weather and UV for the selected date are fetched live from Open-Meteo. Auto-play advances one slot per second.
 
 Available flags:
 
@@ -164,6 +164,40 @@ Available flags:
 ```
 PYTHONPATH=src .venv/bin/python -m unittest discover tests
 ```
+
+### Optional local AI agent
+
+The time-slider can call a local agent endpoint for map-bound night-lighting
+answers. Day shade and day sun windows are computed directly in the browser
+from the selected point and building shadows. The API key stays on the local
+server and is never embedded in `docs/prototype_timeslider.html`.
+
+Paste the key into `.env`:
+
+```
+OPENAI_API_KEY=your_key
+```
+
+See `.env.example` for optional model settings.
+
+Start the local server:
+
+```
+.venv/bin/python scripts/serve_agent.py 8765 docs
+```
+
+Then open:
+
+```
+http://localhost:8765/prototype_timeslider.html
+```
+
+Optional settings:
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `LIGHTMAP_OPENAI_MODEL` | `gpt-5.4-mini` | Model used by the local agent. |
+| `LIGHTMAP_REASONING_EFFORT` | `medium` | Reasoning effort sent to the Responses API. |
 
 ## Running at full 100% scale
 
@@ -208,6 +242,10 @@ See [planning/optimization-plan.md](planning/optimization-plan.md) for the full 
 ## Documentation
 
 - [Project Description](planning/project.md) -- Shipped features, architecture, data sources, and as-mitigated risks.
+- [Presentation Narrative](planning/presentation-narrative.md) -- Talk track that keeps "Shade by day. Light by night." as the public-facing catchphrase.
+- [Narrative Evaluation](planning/narrative-evaluation.md) -- Evidence-backed critique of the current story, with proposal alignment and feedback points.
+- [Shade by Day, Light by Night Roadmap](planning/shadow-lightmap-roadmap.md) -- Active local-first roadmap, narrative rules, time-slider speed pass, and next performance candidates.
+- [AI + Local Development Plan](planning/ai-local-development-plan.md) -- Guardrails and staged AI features that explain computed map evidence without making safety claims.
 - [Data Catalog](planning/data-catalog.md) -- Every dataset researched. Labels which entries are shipped vs downloaded-but-unused vs researched-only.
 - [Technology Research](planning/tech-research.md) -- Shipped tech stack, design decisions, and competitor analysis. Notes why FastAPI + MapLibre were deferred.
 - [Prototype Plan](planning/prototype-plan.md) -- Historical roadmap for the 1-each through 100% scale prototype.

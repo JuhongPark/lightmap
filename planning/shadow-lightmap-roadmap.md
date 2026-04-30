@@ -1,11 +1,16 @@
-# ShadowMap + LightMap Roadmap
+# Shade by Day, Light by Night Roadmap
 
 > Updated 2026-04-29. This is the active narrative and development direction
 > for the next local-first phase.
 
 ## Narrative
 
-LightMap starts with the daytime problem:
+The proposal-level slogan remains:
+
+> Shade by day. Light by night.
+
+That public phrase should stay on top. Under it, the implementation story starts
+with the daytime problem:
 
 > Where is shade right now?
 
@@ -14,7 +19,7 @@ shadows move with the sun while tree canopy fills in static shade coverage.
 
 The paired nighttime experience is a **LightMap**:
 
-> Where is the walk more visible after dark?
+> Where is light right now?
 
 At night, the map emphasizes streetlight density and open, time-aware venues.
 Historic incident data is not the thesis. It stays as an optional reference
@@ -22,6 +27,9 @@ toggle for users who explicitly want that context.
 
 ## Product Rules
 
+- Preserve "Shade by day. Light by night." as the presentation catchphrase.
+- Do not replace the catchphrase with an internal technical slogan.
+- Keep shadow-engine and light-layer wording as implementation details.
 - Lead with day shadows in demos, docs, and AI summaries.
 - Explain night mode as brightness/visibility, not a personal safety guarantee.
 - Keep incident history default-off and explicitly historic.
@@ -135,10 +143,14 @@ Next candidates after this pass:
 
 AI comes after the speed baseline is acceptable.
 
-1. Ask LightMap: explain the current visible shadow/light state.
-2. Route brief: summarize shade and light tradeoffs for a proposed walk.
-3. Planner mode: explain data gaps, lighting clusters, and shade coverage.
-4. Validation assistant: compare field photos against rendered shadow direction.
+1. Explain This View: summarize the current shade, heat, light, and data limits.
+2. Find Shade Near Me: use location or a dropped pin to recommend nearby shaded
+   blocks from computed shade and tree canopy.
+3. Where Is It Bright At Night: use streetlight density and open venues to
+   identify brighter nearby corridors after dark.
+4. Route brief: summarize shade and light tradeoffs for a proposed walk.
+5. Planner mode: explain data gaps, lighting clusters, and shade coverage.
+6. Validation assistant: compare field photos against rendered shadow direction.
 
 AI answers must stay evidence-bound: name the active layer, mention data vintage
 or limits where relevant, and avoid route safety claims.

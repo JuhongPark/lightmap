@@ -4,7 +4,9 @@
 
 ## Motivation
 
-I run in Boston. On hot afternoons, there is no way to know which sidewalks are shaded. After dark, there is no map that shows which streets are well-lit. The name LightMap carries a double meaning: during the day, light refers to where sunlight is absent (shade). At night, it refers to where artificial light is present (safety).
+I run in Boston. On hot afternoons, there is no way to know which sidewalks are shaded. After dark, there is no map that shows which streets are well-lit. The name LightMap carries a double meaning: during the day, light refers to where sunlight is absent (shade). At night, it refers to where artificial light is present (visibility).
+
+The submitted proposal captures that double meaning as: "Shade by day. Light by night."
 
 The public data already exists. Boston and Cambridge publish building footprints with heights, streetlight locations, and tree canopy polygons. No one has combined these into a single time-aware map.
 
@@ -49,7 +51,7 @@ The INITIAL_BBOX is divided into a 25x36 grid (~220 m x ~205 m cells). Cells wit
 
 ## Shipped Architecture
 
-LightMap is a **static HTML** artifact. No server, no API, no runtime. The Python side is a build-time pipeline; the output is one self-contained file served by GitHub Pages.
+LightMap is a **static HTML** artifact. No server, no API, no runtime. The Python side is a build-time pipeline. The output is one self-contained file served by GitHub Pages.
 
 ```
 Build time (Python)                       Run time (browser)
@@ -72,7 +74,7 @@ docs/buildings*.geojson.gz
 ### Design Decisions (as shipped)
 
 1. **Static HTML over client-server.** The original proposal called for FastAPI + MapLibre GL JS. That path was dropped after the folium + Leaflet prototype hit all functional targets at 100% scale. No server avoids hosting cost, deploy complexity, and the "what runs when the demo grader opens it in 6 months" problem. See `tech-research.md` for the deferral rationale.
-2. **Shadow projection as a build-time step with PostGIS fallback.** `src/shadow/compute.py` runs in pure Python for 1%-50% scales. `src/shadow/postgis_compute.py` parallelizes the projection as a SQL query for the 100% build. PostGIS auto-detects at build time; set `LIGHTMAP_NO_POSTGIS=1` to force pure Python.
+2. **Shadow projection as a build-time step with PostGIS fallback.** `src/shadow/compute.py` runs in pure Python for 1%-50% scales. `src/shadow/postgis_compute.py` parallelizes the projection as a SQL query for the 100% build. PostGIS auto-detects at build time. Set `LIGHTMAP_NO_POSTGIS=1` to force pure Python.
 3. **Pre-computed shadow PNG + deferred vector fetch** (render strategy r13 in `render-optimization-plan.md`). PNG flashes first for fast LCP, then the vector layer streams in for interactive click.
 4. **INITIAL_BBOX hard cutoff.** Every dataset is filtered to the Boston + Cambridge core bbox before serialization.
 5. **Tree canopy as a baked PNG overlay, not embedded polygons.** ~59K per-crown polygons were rasterized into a single ~760 KB `trees_canopy.png` image. The browser paints one bitmap on pan/zoom instead of tens of thousands of canvas polygons, and the shipped HTML dropped from ~27 MB to ~15 MB.
@@ -89,7 +91,7 @@ docs/buildings*.geojson.gz
 | Tree canopy (Cambridge 2018 + Boston 2019-2024) | ~59K per-crown | Cambridge GIS + BPDA Tree Canopy | Daytime tree shade |
 | OSM water | 175 features | OpenStreetMap via Overpass | Mask so tree canopy never floats over water |
 | OSM amenity POIs with `opening_hours` | 760 | OpenStreetMap via Overpass | Night-mode venue dots |
-| Boston violent crime (last 2 years, night hours) | ~830 | data.boston.gov CKAN | Night-mode red-diamond pins |
+| Boston violent crime (last 2 years, night hours) | ~830 | data.boston.gov CKAN | Optional historic incident reference pins |
 | OSM hospitals (`amenity=hospital` plus `amenity=clinic` with `emergency=yes`) | 16 | OpenStreetMap via Overpass | 24-hour ER markers (`emergency=yes` subset) for the heat-response fallback |
 | OSM cooling proxy (`amenity=library`, `community_centre`, `townhall`) | ~136 | OpenStreetMap via Overpass | Cooling-center markers, shown only when HEAT threshold is active |
 | Open-Meteo weather + UV | 1 record per slider date | Open-Meteo API | Info-panel strip (live fetch) and HEAT-threshold trigger (tmax, apparent_temperature_max, UV) |
