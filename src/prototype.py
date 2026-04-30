@@ -10,9 +10,8 @@ from zoneinfo import ZoneInfo
 import folium
 import branca.colormap as cm
 import shapely as shapely_module
-from folium.features import GeoJsonPopup, GeoJsonTooltip
 from folium.plugins import (
-    DualMap, Fullscreen, Geocoder, HeatMap, MiniMap, MousePosition,
+    DualMap, Fullscreen, HeatMap, MiniMap, MousePosition,
     TimestampedGeoJson,
 )
 from shapely.geometry import mapping
@@ -603,19 +602,19 @@ def _create_base_map(
     #
     # lock_zoom=True pins the *minimum* zoom at zoom_start so the user
     # cannot scroll out of the prepared frame while scrubbing the slider,
-    # but still allows zooming in (up to 18) for a closer look. Zoom
+    # but still allows zooming in (up to 20) for a closer look. Zoom
     # interactions stay enabled in both modes.
     zoom_start = 16
     min_z = zoom_start if lock_zoom else 15
-    max_z = 18
+    max_z = 20
     m = folium.Map(
         location=MAP_CENTER, zoom_start=zoom_start, tiles=tiles,
         width="100%", height="100%",
         prefer_canvas=prefer_canvas,
         # min_zoom is 1 level below zoom_start so users can pull back
         # slightly for a wider overview but not so far that the shadow
-        # redraw cost explodes. max_zoom matches what CartoDB Positron
-        # and Dark Matter serve natively (18).
+        # redraw cost explodes. max_zoom allows two closer inspection
+        # steps beyond the previous 18 cap.
         min_zoom=min_z, max_zoom=max_z,
         min_lat=min_lat, max_lat=max_lat,
         min_lon=min_lon, max_lon=max_lon,
@@ -639,11 +638,6 @@ def _add_building_layer(m, building_data):
             "weight": 0.5,
             "fillOpacity": 0.6,
         },
-        tooltip=GeoJsonTooltip(
-            fields=["BLDG_HGT_2010"],
-            aliases=["Height (ft):"],
-            style="font-size:12px;",
-        ),
     ).add_to(m)
 
 
@@ -665,10 +659,6 @@ def _add_streetlight_layer(m, coords):
 def _add_food_layer(m, places):
     food_group = folium.FeatureGroup(name="Food Establishments")
     for p in places:
-        popup_html = (
-            '<div style="font-family:sans-serif; font-size:12px; min-width:120px;">'
-            f'<b>{p["name"]}</b></div>'
-        )
         folium.CircleMarker(
             location=[p["lat"], p["lon"]],
             radius=5,
@@ -678,7 +668,6 @@ def _add_food_layer(m, places):
             fill=True,
             fill_color="#fbbf24",
             fill_opacity=0.9,
-            popup=folium.Popup(popup_html, max_width=200),
         ).add_to(food_group)
     food_group.add_to(m)
 
@@ -715,9 +704,6 @@ ONBOARDING_HTML = """
       This map shows <b>where shade falls</b> during the day and
       <b>where streetlights shine</b> at night across Boston and Cambridge.</p>
     <ul style="font-size:13px; line-height:1.8; padding-left:20px; margin:0 0 16px 0;">
-      <li><b>Hover</b> on a building to see its height</li>
-      <li><b>Click</b> a shadow to see building and shadow details</li>
-      <li>Use the <b>search box</b> (top-right) to find an address</li>
       <li>Toggle <b>layers</b> on/off with the control (top-right)</li>
     </ul>
     <button id="onboarding-btn" style="
@@ -747,7 +733,6 @@ def _add_ui_plugins(m, theme="light"):
     MousePosition(position="bottomleft", separator=" | ", prefix="Coords: ").add_to(m)
     tile_layer = "CartoDB positron" if theme == "light" else "CartoDB dark_matter"
     MiniMap(toggle_display=True, minimized=True, tile_layer=tile_layer).add_to(m)
-    Geocoder(collapsed=True, position="topright").add_to(m)
     m.get_root().html.add_child(folium.Element(ONBOARDING_HTML))
 
 
@@ -764,7 +749,7 @@ def _add_info_panel(m, lines, theme="light", position="left:60px"):
     html = (
         f'<div style="position:fixed; top:10px; {position}; z-index:1000;'
         f" background:{bg}; color:{color}; padding:14px 18px;"
-        f" border-radius:8px; font-family:sans-serif; font-size:13px;"
+        f" border-radius:8px; font-family:sans-serif; font-size:14px;"
         f' box-shadow:0 2px 8px {shadow};">'
         f"{content}</div>"
     )
@@ -1308,7 +1293,7 @@ def build_time_slider_map(target_time, scale_pct):
     dark_tiles = folium.TileLayer(
         "CartoDB dark_matter", name="Night tiles",
         overlay=True, control=False, show=False,
-        min_zoom=16, max_zoom=18,
+        min_zoom=16, max_zoom=20,
     )
     dark_tiles.add_to(m)
 
@@ -1363,10 +1348,6 @@ def build_time_slider_map(target_time, scale_pct):
         name="Violent crime (2yr)", show=False, control=False,
     )
     for c in violent_crime:
-        popup_html = (
-            '<div style="font-family:sans-serif; font-size:12px;">'
-            f'<b>{c["type"]}</b></div>'
-        )
         folium.Marker(
             location=[c["lat"], c["lon"]],
             icon=folium.DivIcon(
@@ -1379,7 +1360,6 @@ def build_time_slider_map(target_time, scale_pct):
                     'box-shadow:0 0 3px rgba(0,0,0,0.7);"></div>'
                 ),
             ),
-            popup=folium.Popup(popup_html, max_width=200),
         ).add_to(crash_group)
     crash_group.add_to(m)
 
@@ -1424,13 +1404,13 @@ def build_time_slider_map(target_time, scale_pct):
     min-width: 110px;
   }
   #lm-mode-icon {
-    font-size: 18px;
+    font-size: 20px;
     line-height: 1;
     color: #a78bfa;
     transition: color 0.4s ease;
   }
   #lm-time {
-    font-size: 24px;
+    font-size: 28px;
     font-weight: 600;
     letter-spacing: 0.5px;
     color: #1e293b;
@@ -1444,7 +1424,7 @@ def build_time_slider_map(target_time, scale_pct):
     border-radius: 8px;
     padding: 6px 10px;
     font-family: inherit;
-    font-size: 13px;
+    font-size: 14px;
     color: inherit;
     cursor: pointer;
     outline: none;
@@ -1459,7 +1439,7 @@ def build_time_slider_map(target_time, scale_pct):
     display: flex;
     align-items: center;
     gap: 5px;
-    font-size: 11px;
+    font-size: 13px;
     color: #64748b;
     white-space: nowrap;
     cursor: pointer;
@@ -1480,7 +1460,7 @@ def build_time_slider_map(target_time, scale_pct):
     height: 34px;
     padding: 0;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1493,7 +1473,112 @@ def build_time_slider_map(target_time, scale_pct):
   #lm-range-wrap {
     position: relative;
     padding-top: 18px;
-    padding-bottom: 2px;
+    padding-bottom: 54px;
+  }
+  #lm-point-window-track {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 34px;
+    height: 24px;
+    display: grid;
+    grid-template-columns: repeat(24, minmax(0, 1fr));
+    gap: 3px;
+    padding: 3px;
+    border: 2px solid rgba(148, 163, 184, 0.62);
+    border-radius: 999px;
+    background: rgba(241, 245, 249, 0.92);
+    box-shadow: inset 0 1px 3px rgba(15, 23, 42, 0.12),
+                0 4px 14px rgba(15, 23, 42, 0.14);
+    pointer-events: none;
+    z-index: 1;
+  }
+  .lm-point-window-segment {
+    min-width: 0;
+    height: 100%;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.62);
+    opacity: 0.75;
+    transition: transform 0.15s ease, opacity 0.15s ease;
+  }
+  .lm-point-window-segment.is-sun {
+    background: #eab308;
+    opacity: 1;
+    box-shadow: 0 0 8px rgba(234, 179, 8, 0.55);
+  }
+  .lm-point-window-segment.is-shade {
+    background: #2563eb;
+    opacity: 1;
+    box-shadow: 0 0 8px rgba(37, 99, 235, 0.5);
+  }
+  .lm-point-window-segment.is-lit,
+  .lm-point-window-segment.is-combined {
+    background: #facc15;
+    opacity: 1;
+    box-shadow: 0 0 9px rgba(250, 204, 21, 0.58);
+  }
+  .lm-point-window-segment.is-open {
+    background: #38bdf8;
+    opacity: 1;
+    box-shadow: 0 0 9px rgba(56, 189, 248, 0.48);
+  }
+  .lm-point-window-segment.is-best {
+    outline: 2px solid #0f172a;
+    outline-offset: 1px;
+    transform: scaleY(1.26);
+  }
+  .lm-point-window-segment.is-current {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+    transform: scaleY(1.36);
+  }
+  #lm-point-window-summary {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 66px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.2;
+    pointer-events: none;
+  }
+  #lm-point-window-summary.is-visible {
+    display: flex;
+  }
+  .lm-point-window-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: #2563eb;
+    box-shadow: 0 0 8px rgba(37, 99, 235, 0.5);
+  }
+  .lm-point-window-dot.is-sun {
+    background: #eab308;
+    box-shadow: 0 0 8px rgba(234, 179, 8, 0.52);
+  }
+  .lm-point-window-dot.is-lit,
+  .lm-point-window-dot.is-combined {
+    background: #facc15;
+    box-shadow: 0 0 8px rgba(250, 204, 21, 0.58);
+  }
+  .lm-point-window-dot.is-open {
+    background: #38bdf8;
+    box-shadow: 0 0 8px rgba(56, 189, 248, 0.48);
+  }
+  .lm-point-window-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border: 1px solid rgba(203, 213, 225, 0.92);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.9);
+    padding: 5px 10px;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
   }
   .lm-sun-marker {
     position: absolute;
@@ -1511,7 +1596,7 @@ def build_time_slider_map(target_time, scale_pct):
     position: absolute;
     top: 0;
     transform: translateX(-50%);
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 500;
     color: #94a3b8;
     pointer-events: none;
@@ -1589,6 +1674,43 @@ def build_time_slider_map(target_time, scale_pct):
     background: #334155; border-color: #475569;
   }
   #lm-slider-host.night #lm-range { background: #334155; }
+  #lm-slider-host.night #lm-point-window-track {
+    border-color: rgba(71, 85, 105, 0.8);
+    background: rgba(15, 23, 42, 0.82);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.32),
+                0 2px 8px rgba(0, 0, 0, 0.26);
+  }
+  #lm-slider-host.night .lm-point-window-segment {
+    background: rgba(100, 116, 139, 0.62);
+  }
+  #lm-slider-host.night .lm-point-window-segment.is-sun {
+    background: #eab308;
+    box-shadow: 0 0 9px rgba(234, 179, 8, 0.56);
+  }
+  #lm-slider-host.night .lm-point-window-segment.is-shade {
+    background: #3b82f6;
+    box-shadow: 0 0 9px rgba(59, 130, 246, 0.54);
+  }
+  #lm-slider-host.night .lm-point-window-segment.is-lit,
+  #lm-slider-host.night .lm-point-window-segment.is-combined {
+    background: #facc15;
+    box-shadow: 0 0 10px rgba(250, 204, 21, 0.62);
+  }
+  #lm-slider-host.night .lm-point-window-segment.is-open {
+    background: #38bdf8;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+  }
+  #lm-slider-host.night .lm-point-window-segment.is-best {
+    outline-color: #f8fafc;
+  }
+  #lm-slider-host.night #lm-point-window-summary {
+    color: #cbd5e1;
+  }
+  #lm-slider-host.night .lm-point-window-pill {
+    border-color: rgba(51, 65, 85, 0.95);
+    background: rgba(15, 23, 42, 0.86);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  }
   #lm-slider-host.night #lm-range::-webkit-slider-thumb {
     border-color: #fbbf24;
     box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.2);
@@ -1601,6 +1723,210 @@ def build_time_slider_map(target_time, scale_pct):
     box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.2);
   }
   #lm-slider-host.night .lm-sun-label { color: #64748b; }
+
+  #lm-agent-host {
+    position: fixed;
+    right: 18px;
+    bottom: 150px;
+    z-index: 1000;
+    width: 380px;
+    max-width: calc(100vw - 36px);
+    background: rgba(255, 255, 255, 0.94);
+    border-radius: 10px;
+    padding: 12px;
+    box-shadow: 0 10px 32px rgba(15, 23, 42, 0.18);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                 "Helvetica Neue", Arial, sans-serif;
+    color: #1e293b;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    transition: box-shadow 0.18s ease, transform 0.18s ease;
+  }
+  #lm-agent-host.is-busy {
+    box-shadow:
+      0 12px 34px rgba(15, 23, 42, 0.22),
+      0 0 0 1px rgba(37, 99, 235, 0.32),
+      0 0 0 4px rgba(37, 99, 235, 0.12);
+    transform: translateY(-1px);
+  }
+  #lm-agent-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+    font-size: 15px;
+    font-weight: 700;
+  }
+  #lm-agent-status {
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 500;
+    text-align: right;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+  #lm-agent-host.is-busy #lm-agent-status::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border: 2px solid #bfdbfe;
+    border-top-color: #2563eb;
+    border-radius: 50%;
+    animation: lmAgentSpin 0.8s linear infinite;
+  }
+  #lm-agent-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .lm-agent-section {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .lm-agent-section-title {
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  .lm-agent-chip {
+    border: 1px solid #cbd5e1;
+    border-radius: 7px;
+    background: #f8fafc;
+    color: #334155;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.25;
+    padding: 7px 9px;
+    padding-right: 30px;
+    position: relative;
+    text-align: left;
+    transition: background 0.15s ease, border-color 0.15s ease,
+                color 0.15s ease;
+  }
+  .lm-agent-chip:hover { background: #f1f5f9; border-color: #94a3b8; }
+  .lm-agent-chip.is-active {
+    background: #eff6ff;
+    border-color: #2563eb;
+    color: #1d4ed8;
+  }
+  .lm-agent-chip.is-active::after {
+    content: "";
+    position: absolute;
+    right: 9px;
+    top: 50%;
+    width: 12px;
+    height: 12px;
+    margin-top: -7px;
+    border: 2px solid #bfdbfe;
+    border-top-color: #2563eb;
+    border-radius: 50%;
+    animation: lmAgentSpin 0.8s linear infinite;
+  }
+  #lm-agent-answer {
+    margin-top: 10px;
+    max-height: 190px;
+    overflow: auto;
+    border-top: 1px solid #e2e8f0;
+    padding-top: 8px;
+    color: #334155;
+    font-size: 14px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+  }
+  #lm-slider-host.night ~ #lm-agent-host {
+    background: rgba(15, 23, 42, 0.94);
+    color: #e2e8f0;
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.4);
+  }
+  #lm-slider-host.night ~ #lm-agent-host.is-busy {
+    box-shadow:
+      0 12px 34px rgba(0, 0, 0, 0.46),
+      0 0 0 1px rgba(234, 179, 8, 0.32),
+      0 0 0 4px rgba(234, 179, 8, 0.12);
+  }
+  #lm-slider-host.night ~ #lm-agent-host #lm-agent-status,
+  #lm-slider-host.night ~ #lm-agent-host #lm-agent-answer {
+    color: #94a3b8;
+  }
+  #lm-slider-host.night ~ #lm-agent-host .lm-agent-section-title {
+    color: #94a3b8;
+  }
+  #lm-slider-host.night ~ #lm-agent-host .lm-agent-chip {
+    background: #1e293b;
+    color: #e2e8f0;
+    border-color: #334155;
+  }
+  #lm-slider-host.night ~ #lm-agent-host .lm-agent-chip.is-active {
+    background: #2f2a16;
+    border-color: #eab308;
+    color: #fde68a;
+  }
+  #lm-slider-host.night ~ #lm-agent-host .lm-agent-chip.is-active[data-action="point-shade"] {
+    background: #172554;
+    border-color: #3b82f6;
+    color: #bfdbfe;
+  }
+  #lm-slider-host.night ~ #lm-agent-host .lm-agent-chip.is-active[data-action="point-sun"] {
+    background: #2f2a16;
+    border-color: #eab308;
+    color: #fde68a;
+  }
+  #lm-slider-host.night ~ #lm-agent-host .lm-agent-chip.is-active[data-action="point-light"],
+  #lm-slider-host.night ~ #lm-agent-host .lm-agent-chip.is-active[data-action="point-open"],
+  #lm-slider-host.night ~ #lm-agent-host .lm-agent-chip.is-active[data-action="point-lit-open"] {
+    background: #2f2a16;
+    border-color: #eab308;
+    color: #fde68a;
+  }
+  #lm-slider-host.night ~ #lm-agent-host #lm-agent-answer {
+    border-top-color: #334155;
+  }
+  .leaflet-overlay-pane path.lm-agent-scan-circle {
+    stroke-dasharray: 8 10;
+    animation: lmAgentDash 1.1s linear infinite,
+               lmAgentPulse 1.4s ease-in-out infinite;
+  }
+  .leaflet-marker-icon.lm-agent-scan-label {
+    pointer-events: none;
+  }
+  @keyframes lmAgentSpin {
+    to { transform: rotate(360deg); }
+  }
+  @keyframes lmAgentDash {
+    to { stroke-dashoffset: -36; }
+  }
+  @keyframes lmAgentPulse {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #lm-agent-host,
+    .lm-agent-chip {
+      transition: none;
+    }
+    #lm-agent-host.is-busy #lm-agent-status::before,
+    .lm-agent-chip.is-active::after,
+    .leaflet-overlay-pane path.lm-agent-scan-circle {
+      animation: none;
+    }
+  }
+  @media (max-width: 760px) {
+    #lm-agent-host {
+      left: 18px;
+      right: 18px;
+      bottom: 154px;
+      width: auto;
+    }
+    #lm-agent-answer { max-height: 120px; }
+  }
 </style>
 """
 
@@ -1625,7 +1951,41 @@ def build_time_slider_map(target_time, scale_pct):
     <div class="lm-sun-label" id="lm-sunset-label">--:--</div>
     <div class="lm-sun-marker" id="lm-sunrise-marker"></div>
     <div class="lm-sun-marker" id="lm-sunset-marker"></div>
+    <div id="lm-point-window-track" aria-hidden="true"></div>
+    <div id="lm-point-window-summary" aria-live="polite"></div>
     <input type="range" id="lm-range" min="0" max="23" step="1" value="14">
+  </div>
+</div>
+<div id="lm-agent-host" aria-live="polite">
+  <div id="lm-agent-title">
+    <span>LightMap Agent</span>
+    <span id="lm-agent-status">local agent</span>
+  </div>
+  <div id="lm-agent-actions">
+    <div class="lm-agent-section">
+      <div class="lm-agent-section-title">Daytime</div>
+      <button class="lm-agent-chip" data-action="point-shade" type="button">
+        When is this spot shaded?
+      </button>
+      <button class="lm-agent-chip" data-action="point-sun" type="button">
+        When is this spot sunny?
+      </button>
+    </div>
+    <div class="lm-agent-section">
+      <div class="lm-agent-section-title">Nighttime</div>
+      <button class="lm-agent-chip" data-action="point-light" type="button">
+        When is this area lit?
+      </button>
+      <button class="lm-agent-chip" data-action="point-open" type="button">
+        When are nearby places open?
+      </button>
+      <button class="lm-agent-chip" data-action="point-lit-open" type="button">
+        When is light and activity nearby?
+      </button>
+    </div>
+  </div>
+  <div id="lm-agent-answer" aria-live="polite">
+    Choose an action to highlight a useful area.
   </div>
 </div>
 """
@@ -1644,6 +2004,7 @@ def build_time_slider_map(target_time, scale_pct):
 (function() {
   var BUILDINGS = __BUILDINGS__;
   var POIS = __POIS__;
+  var LIGHT_POINTS = __LIGHT_POINTS__;
   var TREES_PNG_URL = "__TREES_PNG_URL__";
   var TREES_BBOX = __TREES_BBOX__;
   var MEDICAL = __MEDICAL__;
@@ -1651,6 +2012,7 @@ def build_time_slider_map(target_time, scale_pct):
   var HEAT_TMAX_F = __HEAT_TMAX_F__;
   var HEAT_APPARENT_F = __HEAT_APPARENT_F__;
   var HEAT_UV = __HEAT_UV__;
+  var STATIC_COUNTS = __STATIC_COUNTS__;
   var LAT_CENTER = __CENTER_LAT__;
   var LON_CENTER = __CENTER_LON__;
   var INITIAL_DATE = "__INITIAL_DATE__";
@@ -1670,6 +2032,12 @@ def build_time_slider_map(target_time, scale_pct):
   // altitude-0 moments.
   var TWILIGHT_START = 0;
   var DAY_THRESHOLD = 15;
+  var POINT_CHECK_RADIUS_M = 17;
+  var POINT_SCAN_RADIUS_M = 20;
+  var POINT_SHADE_MIN_SAMPLES = 2;
+  var POINT_FULL_SHADE_MIN_SAMPLES = 11;
+  var NIGHT_LIGHT_RADIUS_M = 120;
+  var NIGHT_VENUE_RADIUS_M = 180;
 
   function pad(n) { return n < 10 ? "0" + n : "" + n; }
   function d2r(d) { return d * Math.PI / 180; }
@@ -1749,17 +2117,67 @@ def build_time_slider_map(target_time, scale_pct):
     var ssMarker = document.getElementById("lm-sunset-marker");
     var srLabel = document.getElementById("lm-sunrise-label");
     var ssLabel = document.getElementById("lm-sunset-label");
+    var pointWindowEl = document.getElementById("lm-point-window-track");
+    var pointWindowSummaryEl = document.getElementById("lm-point-window-summary");
+    var agentHostEl = document.getElementById("lm-agent-host");
+    var agentAnswerEl = document.getElementById("lm-agent-answer");
+    var agentStatusEl = document.getElementById("lm-agent-status");
     if (!host || !rangeEl || !dateEl) { setTimeout(setup, 100); return; }
 
     var state = {
       dateStr: INITIAL_DATE, slot: parseInt(rangeEl.value, 10),
       playing: false, playTimer: null, shadowLayer: null,
-      hadShadows: false, incidentsOn: false
+      hadShadows: false, incidentsOn: false,
+      lastSun: null, nightMix: 0, heatOn: false,
+      userLocation: null, userMarker: null,
+      currentShadows: [], openVenuePoints: [],
+      agentHighlight: null, agentHighlightLabel: null,
+      agentScan: null, agentScanLabel: null, agentRunId: 0,
+      pointWindowKind: null, pointWindowAnalysis: null,
+      pointWindowBest: null
     };
 
     function parseDateStr(s) {
       var parts = s.split("-").map(Number);
       return { y: parts[0], m: parts[1] - 1, d: parts[2] };
+    }
+
+    function currentBostonClock() {
+      try {
+        var parts = new Intl.DateTimeFormat("en-US", {
+          timeZone: "America/New_York",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          hour12: false
+        }).formatToParts(new Date());
+        var values = {};
+        for (var i = 0; i < parts.length; i++) {
+          values[parts[i].type] = parts[i].value;
+        }
+        var hour = parseInt(values.hour || "0", 10);
+        if (hour === 24) hour = 0;
+        return {
+          dateStr: values.year + "-" + values.month + "-" + values.day,
+          slot: Math.max(0, Math.min(23, hour))
+        };
+      } catch (e) {
+        var now = new Date();
+        return {
+          dateStr: now.getFullYear() + "-" + pad(now.getMonth() + 1)
+            + "-" + pad(now.getDate()),
+          slot: now.getHours()
+        };
+      }
+    }
+
+    function loadCurrentBostonTime() {
+      var now = currentBostonClock();
+      state.dateStr = now.dateStr;
+      state.slot = now.slot;
+      dateEl.value = now.dateStr;
+      rangeEl.value = now.slot;
     }
 
     function sunAt(dateStr, slot) {
@@ -1776,6 +2194,13 @@ def build_time_slider_map(target_time, scale_pct):
         az: (pos.azimuth * 180 / Math.PI + 180 + 360) % 360,
         hour: hour, min: min
       };
+    }
+
+    function nightMixForAltitude(altDeg) {
+      if (altDeg <= TWILIGHT_START) return 1;
+      if (altDeg >= DAY_THRESHOLD) return 0;
+      return 1 - (altDeg - TWILIGHT_START) /
+        (DAY_THRESHOLD - TWILIGHT_START);
     }
 
     function projectShadow(ring, hm, altDeg, azDeg) {
@@ -1914,12 +2339,13 @@ def build_time_slider_map(target_time, scale_pct):
     }
 
     var poiLayer = L.geoJson(null, {
-      interactive: true,
+      interactive: false,
       pointToLayer: function(feat, latlng) {
         // L.marker with DivIcon lands in markerPane (z-index 600),
         // above both the streetlight heatmap (overlayPane) and the
         // shadow canvas, so the green dot stays legible at night.
         return L.marker(latlng, {
+          interactive: false,
           icon: L.divIcon({
             className: 'lm-poi',
             iconSize: [16, 16],
@@ -1931,16 +2357,6 @@ def build_time_slider_map(target_time, scale_pct):
             )
           })
         });
-      },
-      onEachFeature: function(feat, layer) {
-        var props = feat.properties;
-        var html = '<div style="font-family:sans-serif;font-size:12px;'
-                 + 'min-width:140px;"><b>' + (props.name || "(unnamed)")
-                 + '</b><br><span style="color:#64748b;">'
-                 + props.amenity + '</span><br>'
-                 + '<span style="color:#475569;font-size:11px;">'
-                 + props.hours + '</span></div>';
-        layer.bindPopup(html, { maxWidth: 220 });
       }
     }).addTo(map);
 
@@ -1964,12 +2380,11 @@ def build_time_slider_map(target_time, scale_pct):
       // past that point looked like a glitch against the daytime
       // basemap.
       poiLayer.clearLayers();
-      var nightMix;
-      if (altDeg <= TWILIGHT_START) nightMix = 1;
-      else if (altDeg >= DAY_THRESHOLD) nightMix = 0;
-      else nightMix = 1 - (altDeg - TWILIGHT_START) /
-                          (DAY_THRESHOLD - TWILIGHT_START);
-      if (nightMix <= 0.5) return;
+      var nightMix = nightMixForAltitude(altDeg);
+      if (nightMix <= 0.5) {
+        state.openVenuePoints = [];
+        return;
+      }
       var key = state.dateStr + ":" + state.slot;
       var feats;
       if (poiCache.has(key)) {
@@ -2001,6 +2416,9 @@ def build_time_slider_map(target_time, scale_pct):
       poiLayer.addData({
         type: "FeatureCollection", features: feats
       });
+      state.openVenuePoints = feats.map(function(f) {
+        return f.geometry.coordinates;
+      });
     }
 
     // Per-slot shadow cache. Key = "YYYY-MM-DD:slot". Populated lazily
@@ -2026,6 +2444,511 @@ def build_time_slider_map(target_time, scale_pct):
       return shadows;
     }
 
+    function pointInRing(lat, lon, ring) {
+      var inside = false;
+      for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        var xi = ring[i][0], yi = ring[i][1];
+        var xj = ring[j][0], yj = ring[j][1];
+        var crosses = ((yi > lat) !== (yj > lat)) &&
+          (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+        if (crosses) inside = !inside;
+      }
+      return inside;
+    }
+
+    function buildingCanReachPoint(b, lat, lon) {
+      var bb = b[2];
+      return !(lon < bb[0] - SHADOW_LON_MARGIN ||
+               lon > bb[2] + SHADOW_LON_MARGIN ||
+               lat < bb[1] - SHADOW_LAT_MARGIN ||
+               lat > bb[3] + SHADOW_LAT_MARGIN);
+    }
+
+    function buildingCanReachCircle(b, lat, lon, radiusM) {
+      var bb = b[2];
+      var dLat = radiusM / M_PER_DEG_LAT;
+      var dLon = radiusM / M_PER_DEG_LON;
+      return !(lon + dLon < bb[0] - SHADOW_LON_MARGIN ||
+               lon - dLon > bb[2] + SHADOW_LON_MARGIN ||
+               lat + dLat < bb[1] - SHADOW_LAT_MARGIN ||
+               lat - dLat > bb[3] + SHADOW_LAT_MARGIN);
+    }
+
+    function circleSamplePoints(lat, lon, radiusM) {
+      var r = radiusM;
+      var s = r * 0.55;
+      var o = r * 0.85;
+      var raw = [
+        [0, 0],
+        [s, 0], [-s, 0], [0, s], [0, -s],
+        [s * 0.7, s * 0.7], [s * 0.7, -s * 0.7],
+        [-s * 0.7, s * 0.7], [-s * 0.7, -s * 0.7],
+        [o, 0], [-o, 0], [0, o], [0, -o]
+      ];
+      var out = [];
+      for (var i = 0; i < raw.length; i++) {
+        out.push({
+          lat: lat + raw[i][1] / M_PER_DEG_LAT,
+          lon: lon + raw[i][0] / M_PER_DEG_LON
+        });
+      }
+      return out;
+    }
+
+    function pointShadeAtSlot(lat, lon, slot) {
+      var sun = sunAt(state.dateStr, slot);
+      var samples = circleSamplePoints(lat, lon, POINT_CHECK_RADIUS_M);
+      var shadedSamples = new Array(samples.length).fill(false);
+      var result = {
+        slot: slot,
+        alt: sun.alt,
+        shaded: false,
+        bright: false,
+        fullShade: false,
+        partialShade: false,
+        coverage: 0,
+        brightCoverage: 0,
+        sampleCount: samples.length,
+        shadedSampleCount: 0,
+        score: 0,
+        count: 0,
+        maxHeight: 0
+      };
+      if (sun.alt < DAY_THRESHOLD) {
+        return result;
+      }
+      for (var i = 0; i < BUILDINGS.length; i++) {
+        var b = BUILDINGS[i];
+        if (!buildingCanReachCircle(b, lat, lon, POINT_CHECK_RADIUS_M)) continue;
+        var hull = projectShadow(b[1], b[0], sun.alt, sun.az);
+        if (!hull || hull.length < 3) continue;
+        var coveredByBuilding = 0;
+        for (var si = 0; si < samples.length; si++) {
+          if (!pointInRing(samples[si].lat, samples[si].lon, hull)) continue;
+          coveredByBuilding += 1;
+          if (!shadedSamples[si]) {
+            shadedSamples[si] = true;
+            result.shadedSampleCount += 1;
+          }
+        }
+        if (!coveredByBuilding) continue;
+        result.count += 1;
+        result.score += (coveredByBuilding / samples.length)
+          * (1 + Math.min(b[0] / 60, 2));
+        if (b[0] > result.maxHeight) result.maxHeight = b[0];
+      }
+      result.coverage = result.shadedSampleCount / samples.length;
+      result.brightCoverage = 1 - result.coverage;
+      result.shaded = result.shadedSampleCount >= POINT_SHADE_MIN_SAMPLES;
+      result.fullShade = result.shadedSampleCount >= POINT_FULL_SHADE_MIN_SAMPLES;
+      result.partialShade = result.shaded && !result.fullShade;
+      result.bright = !result.shaded;
+      result.score += result.coverage * 4;
+      return result;
+    }
+
+    function analyzePointSun(lat, lon) {
+      var slots = [];
+      var bestShade = null;
+      var bestBright = null;
+      for (var slot = 0; slot < 24; slot++) {
+        var item = pointShadeAtSlot(lat, lon, slot);
+        slots.push(item);
+        if (item.shaded &&
+            (!bestShade || item.score > bestShade.score)) {
+          bestShade = item;
+        }
+        if (item.bright &&
+            (!bestBright ||
+             (item.brightCoverage * 20 + item.alt) >
+             (bestBright.brightCoverage * 20 + bestBright.alt))) {
+          bestBright = item;
+        }
+      }
+      return {
+        lat: lat,
+        lon: lon,
+        slots: slots,
+        shadeGroups: pointSignalGroups(slots, "shaded"),
+        brightGroups: pointSignalGroups(slots, "bright"),
+        bestShade: bestShade,
+        bestBright: bestBright
+      };
+    }
+
+    function nearbyLightStats(lat, lon, radiusM) {
+      var stats = {
+        count: 0,
+        score: 0,
+        nearestM: null,
+        radiusM: radiusM
+      };
+      for (var i = 0; i < LIGHT_POINTS.length; i++) {
+        var p = LIGHT_POINTS[i];
+        var d = distanceM(lat, lon, p[0], p[1]);
+        if (d > radiusM) continue;
+        stats.count += 1;
+        stats.score += Math.max(0.1, 1 - d / radiusM);
+        if (stats.nearestM === null || d < stats.nearestM) {
+          stats.nearestM = d;
+        }
+      }
+      if (stats.nearestM !== null) {
+        stats.nearestM = Math.round(stats.nearestM);
+      }
+      return stats;
+    }
+
+    function nearbyOpenVenuesAtSlot(lat, lon, slot, radiusM) {
+      var d = ohDate(state.dateStr, slot);
+      var places = [];
+      for (var i = 0; i < poiParsed.length; i++) {
+        var p = poiParsed[i];
+        var dist = distanceM(lat, lon, p.lat, p.lon);
+        if (dist > radiusM) continue;
+        try {
+          if (!p.oh.getState(d)) continue;
+        } catch (e) { continue; }
+        places.push({
+          name: p.name,
+          amenity: p.amenity,
+          distanceM: Math.round(dist)
+        });
+      }
+      places.sort(function(a, b) { return a.distanceM - b.distanceM; });
+      return {
+        count: places.length,
+        radiusM: radiusM,
+        places: places.slice(0, 4)
+      };
+    }
+
+    function isNightSlot(slot) {
+      var sun = sunAt(state.dateStr, slot);
+      return nightMixForAltitude(sun.alt) > 0.5;
+    }
+
+    function analyzePointNight(lat, lon, kind) {
+      var lightStats = nearbyLightStats(lat, lon, NIGHT_LIGHT_RADIUS_M);
+      var slots = [];
+      var best = null;
+      for (var slot = 0; slot < 24; slot++) {
+        var openStats = nearbyOpenVenuesAtSlot(
+          lat, lon, slot, NIGHT_VENUE_RADIUS_M
+        );
+        var night = isNightSlot(slot);
+        var lit = night && lightStats.count > 0;
+        var open = night && openStats.count > 0;
+        var combined = lit && open;
+        var active = kind === "light" ? lit
+          : kind === "open" ? open
+          : combined;
+        var score = 0;
+        if (lit) score += lightStats.score + 1;
+        if (open) score += openStats.count * 2;
+        if (combined) score += 3;
+        var item = {
+          slot: slot,
+          night: night,
+          lit: lit,
+          open: open,
+          combined: combined,
+          active: active,
+          score: score,
+          lightCount: lightStats.count,
+          openCount: openStats.count,
+          places: openStats.places
+        };
+        slots.push(item);
+        if (active && (!best || item.score > best.score)) {
+          best = item;
+        }
+      }
+      return {
+        lat: lat,
+        lon: lon,
+        kind: kind,
+        slots: slots,
+        lightStats: lightStats,
+        venueRadiusM: NIGHT_VENUE_RADIUS_M,
+        lightGroups: pointSignalGroups(slots, "lit"),
+        openGroups: pointSignalGroups(slots, "open"),
+        combinedGroups: pointSignalGroups(slots, "combined"),
+        best: best
+      };
+    }
+
+    function pointSignalGroups(slots, prop) {
+      var groups = [];
+      var start = null;
+      for (var i = 0; i < slots.length; i++) {
+        if (slots[i][prop]) {
+          if (start === null) start = slots[i].slot;
+        } else if (start !== null) {
+          groups.push({ start: start, end: slots[i].slot });
+          start = null;
+        }
+      }
+      if (start !== null) groups.push({ start: start, end: 24 });
+      return groups;
+    }
+
+    function clearPointWindowTrack() {
+      if (pointWindowEl) pointWindowEl.innerHTML = "";
+      if (pointWindowSummaryEl) {
+        pointWindowSummaryEl.innerHTML = "";
+        pointWindowSummaryEl.classList.remove("is-visible");
+      }
+      state.pointWindowKind = null;
+      state.pointWindowAnalysis = null;
+      state.pointWindowBest = null;
+    }
+
+    function currentAnalysisSlot(analysis) {
+      if (!analysis || !analysis.slots) return null;
+      for (var i = 0; i < analysis.slots.length; i++) {
+        if (analysis.slots[i].slot === state.slot) return analysis.slots[i];
+      }
+      return null;
+    }
+
+    function currentPointWindowLabel(analysis, kind) {
+      var slot = currentAnalysisSlot(analysis);
+      if (!slot) return "";
+      if (kind === "shade") {
+        return "Shadow here: " + formatPct(slot.coverage)
+          + " at " + formatHour(slot.slot);
+      }
+      if (kind === "sun") {
+        return "Sun here: " + formatPct(slot.brightCoverage)
+          + " at " + formatHour(slot.slot);
+      }
+      return "";
+    }
+
+    function renderPointWindowSummary(analysis, kind) {
+      if (!pointWindowSummaryEl) return;
+      pointWindowSummaryEl.innerHTML = "";
+      if (kind === "shade" || kind === "sun") {
+        var currentText = currentPointWindowLabel(analysis, kind);
+        if (!currentText) return;
+        var currentPill = document.createElement("span");
+        currentPill.className = "lm-point-window-pill";
+        var currentDot = document.createElement("span");
+        currentDot.className = "lm-point-window-dot"
+          + (kind === "sun" ? " is-sun" : "");
+        var currentLabel = document.createElement("span");
+        currentLabel.textContent = currentText;
+        currentPill.appendChild(currentDot);
+        currentPill.appendChild(currentLabel);
+        pointWindowSummaryEl.appendChild(currentPill);
+        pointWindowSummaryEl.classList.add("is-visible");
+        return;
+      }
+      var groups = kind === "sun" ? analysis.brightGroups
+        : kind === "shade" ? analysis.shadeGroups
+        : kind === "light" ? analysis.lightGroups
+        : kind === "open" ? analysis.openGroups
+        : analysis.combinedGroups;
+      var pill = document.createElement("span");
+      pill.className = "lm-point-window-pill";
+      var dot = document.createElement("span");
+      var dotClass = kind === "sun" ? " is-sun"
+        : kind === "light" ? " is-lit"
+        : kind === "open" ? " is-open"
+        : kind === "lit-open" ? " is-combined"
+        : "";
+      dot.className = "lm-point-window-dot" + dotClass;
+      var label = document.createElement("span");
+      if (groups && groups.length) {
+        var prefix = kind === "light" ? "Light here: "
+          : kind === "open" ? "Open nearby: "
+          : "Light + open nearby: ";
+        label.textContent = prefix + formatGroups(groups);
+      } else {
+        label.textContent = kind === "sun" ? "No day sun here today"
+          : kind === "shade" ? "No building shade here today"
+          : kind === "light" ? "No night light signal here today"
+          : kind === "open" ? "No nearby open-place window tonight"
+          : "No light + open-place overlap tonight";
+      }
+      pill.appendChild(dot);
+      pill.appendChild(label);
+      pointWindowSummaryEl.appendChild(pill);
+      pointWindowSummaryEl.classList.add("is-visible");
+    }
+
+    function renderPointWindowTrack(analysis, kind, best) {
+      clearPointWindowTrack();
+      if (!pointWindowEl || !analysis || !analysis.slots) return;
+      state.pointWindowKind = kind;
+      state.pointWindowAnalysis = analysis;
+      state.pointWindowBest = best || null;
+      for (var i = 0; i < analysis.slots.length; i++) {
+        var slot = analysis.slots[i];
+        var el = document.createElement("div");
+        var active = kind === "sun" ? slot.bright
+          : kind === "shade" ? slot.shaded
+          : kind === "light" ? slot.lit
+          : kind === "open" ? slot.open
+          : slot.combined;
+        el.className = "lm-point-window-segment"
+          + (kind === "sun" && active ? " is-sun" : "")
+          + (kind === "shade" && active ? " is-shade" : "")
+          + (kind === "light" && active ? " is-lit" : "")
+          + (kind === "open" && active ? " is-open" : "")
+          + (kind === "lit-open" && active ? " is-combined" : "")
+          + (best && best.slot === slot.slot ? " is-best" : "");
+        el.setAttribute("data-slot", String(slot.slot));
+        if (kind === "shade" && active) {
+          el.style.opacity = String(0.3 + slot.coverage * 0.7);
+        } else if (kind === "sun" && active) {
+          el.style.opacity = String(0.3 + slot.brightCoverage * 0.7);
+        }
+        el.title = formatHour(slot.slot) + " "
+          + (kind === "sun" || kind === "shade"
+            ? (slot.shaded
+              ? (slot.fullShade ? "full building shade "
+                : "partial building shade ") + formatPct(slot.coverage)
+              : slot.bright ? "day sun " + formatPct(slot.brightCoverage)
+              : "low sun or night")
+            : (slot.combined ? "light and open places"
+              : slot.lit ? "night light"
+              : slot.open ? "open places nearby"
+              : slot.night ? "night, no selected signal"
+              : "daytime"));
+        pointWindowEl.appendChild(el);
+      }
+      syncPointWindowToSlot();
+    }
+
+    function syncPointWindowToSlot() {
+      if (!state.pointWindowAnalysis || !state.pointWindowKind) return;
+      renderPointWindowSummary(
+        state.pointWindowAnalysis, state.pointWindowKind
+      );
+      if (pointWindowEl) {
+        var segments = pointWindowEl.querySelectorAll(".lm-point-window-segment");
+        for (var i = 0; i < segments.length; i++) {
+          segments[i].classList.toggle(
+            "is-current",
+            segments[i].getAttribute("data-slot") === String(state.slot)
+          );
+        }
+      }
+      syncAgentHighlightToSlot();
+    }
+
+    function formatHour(slot) {
+      if (slot >= 24) return "24:00";
+      return pad(slot) + ":00";
+    }
+
+    function formatPct(value) {
+      return Math.round((value || 0) * 100) + "%";
+    }
+
+    function formatGroups(groups) {
+      if (!groups || !groups.length) return "";
+      var out = [];
+      for (var i = 0; i < groups.length; i++) {
+        out.push(formatHour(groups[i].start) + "-" + formatHour(groups[i].end));
+      }
+      return out.join(", ");
+    }
+
+    function pointSunSummary(analysis, kind) {
+      if (kind === "sun") {
+        if (!analysis.bestBright) {
+          return "No day-sun window was found for this point on "
+            + state.dateStr + ". This hourly scan uses building shadows only.";
+        }
+        return "Day sun reaches this point during "
+          + formatGroups(analysis.brightGroups) + " on " + state.dateStr
+          + ". Sunniest slot: " + formatHour(analysis.bestBright.slot)
+          + " with " + formatPct(analysis.bestBright.brightCoverage)
+          + " of the check circle open to sun"
+          + ". This hourly scan uses building shadows only. Tree canopy is "
+          + "shown separately as visual context.";
+      }
+      if (!analysis.bestShade) {
+        return "No building shade reaches this point on " + state.dateStr
+          + ". This hourly scan uses building shadows only. Tree canopy is "
+          + "shown separately as visual context.";
+      }
+      return "Building shade reaches this point during "
+        + formatGroups(analysis.shadeGroups) + " on " + state.dateStr
+        + ". Strongest slot: " + formatHour(analysis.bestShade.slot)
+        + " with " + formatPct(analysis.bestShade.coverage)
+        + " of the check circle covered"
+        + " and " + analysis.bestShade.count
+        + " overlapping shadow signal"
+        + (analysis.bestShade.count === 1 ? "" : "s")
+        + ". Tree canopy is shown separately as visual context.";
+    }
+
+    function placeExamples(places) {
+      if (!places || !places.length) return "";
+      var names = [];
+      for (var i = 0; i < places.length && i < 3; i++) {
+        names.push(places[i].name);
+      }
+      return names.join(", ");
+    }
+
+    function pointNightSummary(analysis, kind) {
+      var groups = kind === "light" ? analysis.lightGroups
+        : kind === "open" ? analysis.openGroups
+        : analysis.combinedGroups;
+      var lightStats = analysis.lightStats;
+      if (!groups || !groups.length) {
+        if (kind === "light") {
+          return "No nearby streetlight signal was found for this point tonight. "
+            + "The check looked within " + lightStats.radiusM
+            + " m and uses public streetlight records as visibility context.";
+        }
+        if (kind === "open") {
+          return "No nearby open-place window was found tonight. The check "
+            + "looked within " + analysis.venueRadiusM
+            + " m and only uses venues with OSM opening-hours data.";
+        }
+        return "No overlap was found tonight between nearby streetlight "
+          + "signals and open places. This is visibility context, not a "
+          + "personal safety claim.";
+      }
+      var best = analysis.best;
+      if (kind === "light") {
+        return "Nearby night lighting is present during "
+          + formatGroups(groups) + " on " + state.dateStr
+          + ". The check found " + lightStats.count
+          + " streetlight signal" + (lightStats.count === 1 ? "" : "s")
+          + " within " + lightStats.radiusM + " m"
+          + (lightStats.nearestM === null ? "."
+            : ", nearest about " + lightStats.nearestM + " m away.")
+          + " This is visibility context, not a personal safety claim.";
+      }
+      if (kind === "open") {
+        return "Nearby places are open during " + formatGroups(groups)
+          + " on " + state.dateStr + ". Best slot: "
+          + formatHour(best.slot) + " with " + best.openCount
+          + " open place" + (best.openCount === 1 ? "" : "s")
+          + " within " + analysis.venueRadiusM + " m"
+          + (placeExamples(best.places)
+            ? ". Examples: " + placeExamples(best.places) + "."
+            : ".")
+          + " This only reflects venues with OSM opening-hours data.";
+      }
+      return "Nearby lighting and open places overlap during "
+        + formatGroups(groups) + " on " + state.dateStr
+        + ". Best slot: " + formatHour(best.slot)
+        + " with " + lightStats.count + " streetlight signal"
+        + (lightStats.count === 1 ? "" : "s")
+        + " and " + best.openCount + " open place"
+        + (best.openCount === 1 ? "" : "s")
+        + " nearby. This is visibility and activity context, not a "
+        + "personal safety claim.";
+    }
+
     function renderShadows(altDeg, azDeg) {
       // Keep shadows off until the sun is DAY_THRESHOLD above the
       // horizon. Below that angle shadow_length = height / tan(alt)
@@ -2037,6 +2960,8 @@ def build_time_slider_map(target_time, scale_pct):
           state.shadowLayer.clear();
           state.hadShadows = false;
         }
+        state.currentShadows = [];
+        state.shadowCount = 0;
         if (state.treeLayer && map.hasLayer(state.treeLayer)) {
           map.removeLayer(state.treeLayer);
         }
@@ -2067,6 +2992,8 @@ def build_time_slider_map(target_time, scale_pct):
       var t1 = performance.now();
       var drawMs = state.shadowLayer.setShadows(shadows);
       var t2 = performance.now();
+      state.shadowCount = shadows.length;
+      state.currentShadows = shadows;
       window.__lightmapTimeSlider = {
         slot: state.slot,
         date: state.dateStr,
@@ -2096,11 +3023,8 @@ def build_time_slider_map(target_time, scale_pct):
       // its own. The dark tile fades by opacity so the scene brightens
       // gradually. Streetlights + food stay on through the transition
       // and clear out at DAY_THRESHOLD.
-      var nightMix;
-      if (altDeg <= TWILIGHT_START) nightMix = 1;
-      else if (altDeg >= DAY_THRESHOLD) nightMix = 0;
-      else nightMix = 1 - (altDeg - TWILIGHT_START) /
-                          (DAY_THRESHOLD - TWILIGHT_START);
+      var nightMix = nightMixForAltitude(altDeg);
+      state.nightMix = nightMix;
 
       if (nightMix > 0) {
         if (!map.hasLayer(dark)) dark.addTo(map);
@@ -2171,10 +3095,11 @@ def build_time_slider_map(target_time, scale_pct):
       if (pendingRender !== null) return;
       pendingRender = requestAnimationFrame(function() {
         pendingRender = null;
-        var s = sunAt(state.dateStr, state.slot);
-        renderTheme(s.alt);
-        renderShadows(s.alt, s.az);
-        renderPois(s.alt);
+      var s = sunAt(state.dateStr, state.slot);
+      state.lastSun = s;
+      renderTheme(s.alt);
+      renderShadows(s.alt, s.az);
+      renderPois(s.alt);
       });
     }
 
@@ -2183,6 +3108,7 @@ def build_time_slider_map(target_time, scale_pct):
       timeEl.textContent = pad(s.hour) + ":" + pad(s.min);
       rangeEl.value = state.slot;
       scheduleRender();
+      syncPointWindowToSlot();
     }
 
     rangeEl.addEventListener("input", function() {
@@ -2207,6 +3133,7 @@ def build_time_slider_map(target_time, scale_pct):
       // POI open/closed state also depends on day of week and date
       // (weekday vs weekend, PH, specific date overrides).
       poiCache.clear();
+      clearPointWindowTrack();
       updateSunMarkers();
       updateScene();
       fetchWeather(state.dateStr);
@@ -2356,13 +3283,6 @@ def build_time_slider_map(target_time, scale_pct):
             + 'box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div>'
       });
       var cM = L.marker([cl.lat, cl.lon], { icon: cIcon });
-      var cPop = '<div style="font-family:sans-serif;font-size:12px;'
-               + 'min-width:140px;"><b>' + (cl.name || "Cooling")
-               + '</b><br><span style="color:#0891b2;font-weight:700;">'
-               + 'Cooling option</span>'
-               + '<br><span style="color:#64748b;font-size:11px;">'
-               + cl.amenity + ' (OSM proxy)</span></div>';
-      cM.bindPopup(cPop, { maxWidth: 220 });
       cM.addTo(coolingLayer);
     }
 
@@ -2370,6 +3290,7 @@ def build_time_slider_map(target_time, scale_pct):
     function applyHeatState(on) {
       if (on === heatOn) return;
       heatOn = !!on;
+      state.heatOn = heatOn;
       if (heatOn) {
         if (!map.hasLayer(coolingLayer)) coolingLayer.addTo(map);
       } else {
@@ -2381,7 +3302,590 @@ def build_time_slider_map(target_time, scale_pct):
       }
     }
 
-    fetchWeather(state.dateStr);
+    function agentMode() {
+      if (state.nightMix > 0.5) return "night";
+      if (state.lastSun && state.lastSun.alt < DAY_THRESHOLD) return "twilight";
+      return "day";
+    }
+
+    function distanceM(aLat, aLon, bLat, bLon) {
+      var dx = (aLon - bLon) * M_PER_DEG_LON;
+      var dy = (aLat - bLat) * M_PER_DEG_LAT;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function activeReferencePoint() {
+      if (state.userLocation) {
+        return { lat: state.userLocation.lat, lon: state.userLocation.lon };
+      }
+      var c = map.getCenter();
+      return { lat: c.lat, lon: c.lng };
+    }
+
+    function ensureReferenceLocation(done) {
+      if (state.userLocation) {
+        done();
+        return;
+      }
+      if (!navigator.geolocation) {
+        var c = map.getCenter();
+        setAgentLocation(c.lat, c.lng, null, "map center");
+        done();
+        return;
+      }
+      setAgentStatus("locating...");
+      navigator.geolocation.getCurrentPosition(function(pos) {
+        setAgentLocation(
+          pos.coords.latitude, pos.coords.longitude,
+          pos.coords.accuracy, "browser"
+        );
+        done();
+      }, function() {
+        var c = map.getCenter();
+        setAgentLocation(c.lat, c.lng, null, "map center");
+        done();
+      }, {
+        enableHighAccuracy: true, timeout: 5000, maximumAge: 60000
+      });
+    }
+
+    function makeCandidateGrid(kind) {
+      var b = map.getBounds();
+      var west = b.getWest(), east = b.getEast();
+      var south = b.getSouth(), north = b.getNorth();
+      var cols = 5, rows = 5;
+      var ref = activeReferencePoint();
+      var cells = [];
+      for (var y = 0; y < rows; y++) {
+        for (var x = 0; x < cols; x++) {
+          var lat = south + (north - south) * (y + 0.5) / rows;
+          var lon = west + (east - west) * (x + 0.5) / cols;
+          var cellSpan = Math.min(
+            (north - south) * M_PER_DEG_LAT / rows,
+            (east - west) * M_PER_DEG_LON / cols
+          );
+          var radius = Math.max(
+            kind === "shade" ? 45 : 65,
+            Math.min(kind === "shade" ? 95 : 170, cellSpan * 0.28)
+          );
+          cells.push({
+            id: kind + "-" + x + "-" + y,
+            kind: kind,
+            lat: lat,
+            lon: lon,
+            radiusM: Math.round(radius),
+            rawScore: 0,
+            distanceM: distanceM(lat, lon, ref.lat, ref.lon)
+          });
+        }
+      }
+
+      function cellFor(lat, lon) {
+        if (lat < south || lat > north || lon < west || lon > east) return null;
+        var cx = Math.min(cols - 1, Math.max(0, Math.floor((lon - west) / (east - west) * cols)));
+        var cy = Math.min(rows - 1, Math.max(0, Math.floor((lat - south) / (north - south) * rows)));
+        return cells[cy * cols + cx];
+      }
+
+      if (kind === "shade") {
+        for (var si = 0; si < state.currentShadows.length; si++) {
+          var item = state.currentShadows[si];
+          var ring = item[1];
+          if (!ring || ring.length < 3) continue;
+          var minLon = ring[0][0], maxLon = ring[0][0];
+          var minLat = ring[0][1], maxLat = ring[0][1];
+          for (var r = 1; r < ring.length; r++) {
+            var lon = ring[r][0], lat = ring[r][1];
+            if (lon < minLon) minLon = lon; else if (lon > maxLon) maxLon = lon;
+            if (lat < minLat) minLat = lat; else if (lat > maxLat) maxLat = lat;
+          }
+          var cell = cellFor((minLat + maxLat) / 2, (minLon + maxLon) / 2);
+          if (cell) cell.rawScore += 1 + Math.min(item[0] / 60, 2);
+        }
+      } else if (kind === "bright") {
+        for (var li = 0; li < LIGHT_POINTS.length; li++) {
+          var lp = LIGHT_POINTS[li];
+          var lc = cellFor(lp[0], lp[1]);
+          if (lc) lc.rawScore += 1;
+        }
+        for (var vi = 0; vi < state.openVenuePoints.length; vi++) {
+          var vp = state.openVenuePoints[vi];
+          var vc = cellFor(vp[1], vp[0]);
+          if (vc) vc.rawScore += 5;
+        }
+      } else {
+        var centerCell = cellFor(ref.lat, ref.lon) || cells[Math.floor(cells.length / 2)];
+        centerCell.rawScore = 1;
+      }
+
+      for (var i = 0; i < cells.length; i++) {
+        var distPenalty = 1 + (cells[i].distanceM / 550);
+        cells[i].score = cells[i].rawScore / distPenalty;
+        cells[i].label = kind === "shade" ? "Recommended shade area"
+          : kind === "bright" ? "Recommended bright area"
+          : "Current view area";
+        cells[i].evidence = kind === "shade"
+          ? Math.round(cells[i].rawScore) + " nearby shadow signals"
+          : kind === "bright"
+            ? Math.round(cells[i].rawScore) + " nearby light and venue signals"
+            : "current map center";
+      }
+      cells.sort(function(a, b) { return b.score - a.score; });
+      return cells.slice(0, 8);
+    }
+
+    function actionQuestion(action) {
+      if (action === "shade") return "Find the best nearby shade area.";
+      if (action === "bright") return "Find the brightest nearby area at night.";
+      if (action === "point-light") return "When is this area lit?";
+      if (action === "point-open") return "When are nearby places open?";
+      if (action === "point-lit-open") {
+        return "When is light and activity nearby?";
+      }
+      return "Summarize the selected map evidence.";
+    }
+
+    function collectAgentContext(action) {
+      var b = map.getBounds();
+      var c = map.getCenter();
+      var weatherText = weatherEl ? weatherEl.textContent : "";
+      return {
+        app: "LightMap Boston and Cambridge",
+        action: action || "view",
+        date: state.dateStr,
+        hour: state.slot,
+        mode: agentMode(),
+        sun: state.lastSun,
+        heat: { active: state.heatOn, weather: weatherText },
+        incidents: { enabled: state.incidentsOn },
+        location: state.userLocation,
+        viewport: {
+          center: { lat: c.lat, lon: c.lng },
+          zoom: map.getZoom(),
+          bounds: {
+            west: b.getWest(), south: b.getSouth(),
+            east: b.getEast(), north: b.getNorth()
+          }
+        },
+        candidates: makeCandidateGrid(action || "view"),
+        visible: {
+          shadowCount: state.shadowCount || 0,
+          treesShown: !!(state.treeLayer && map.hasLayer(state.treeLayer)),
+          streetlightsShown: map.hasLayer(lights),
+          openVenuesShown: poiLayer.getLayers().length,
+          coolingShown: map.hasLayer(coolingLayer),
+          erShown: map.hasLayer(erLayer)
+        },
+        counts: STATIC_COUNTS,
+        caveats: [
+          "Tree canopy is a static shade overlay.",
+          "Streetlights and venues are public-data visibility context.",
+          "Historic incidents are optional references, not safety predictions."
+        ]
+      };
+    }
+
+    function setAgentAnswer(text) {
+      if (agentAnswerEl) agentAnswerEl.textContent = text;
+    }
+
+    function setAgentStatus(text) {
+      if (agentStatusEl) agentStatusEl.textContent = text;
+    }
+
+    function setAgentBusy(action, busy) {
+      if (agentHostEl) {
+        agentHostEl.classList.toggle("is-busy", !!busy);
+        agentHostEl.setAttribute("aria-busy", busy ? "true" : "false");
+      }
+      var chips = document.querySelectorAll(".lm-agent-chip");
+      for (var i = 0; i < chips.length; i++) {
+        var chipAction = chips[i].getAttribute("data-action") || "view";
+        chips[i].classList.toggle("is-active", !!busy && chipAction === action);
+      }
+    }
+
+    function finishAgentRun(runId, startedAt, done) {
+      var delay = Math.max(0, 520 - (Date.now() - startedAt));
+      setTimeout(function() {
+        if (runId !== state.agentRunId) return;
+        setAgentBusy(null, false);
+        clearAgentScan();
+        done();
+      }, delay);
+    }
+
+    function agentActionColor(kind) {
+      return (kind === "bright" || kind === "sun" ||
+              kind === "light" || kind === "lit-open") ? "#eab308"
+        : kind === "open" ? "#38bdf8"
+        : kind === "shade" ? "#2563eb"
+        : "#2563eb";
+    }
+
+    function escapeHtml(value) {
+      var map = {
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      };
+      return String(value).replace(/[&<>"']/g, function(ch) {
+        return map[ch];
+      });
+    }
+
+    function setAgentLocation(lat, lon, accuracy, source) {
+      state.userLocation = {
+        lat: lat, lon: lon,
+        accuracyM: accuracy || null,
+        source: source || "browser"
+      };
+      if (!state.userMarker) {
+        state.userMarker = L.marker([lat, lon], {
+          title: "Agent location",
+          icon: L.divIcon({
+            className: "lm-agent-location",
+            iconSize: [18, 18],
+            iconAnchor: [9, 9],
+            html: (
+              '<div style="width:14px;height:14px;border-radius:50%;'
+              + 'background:#2563eb;border:2px solid #fff;'
+              + 'box-shadow:0 1px 5px rgba(15,23,42,0.4);"></div>'
+            )
+          })
+        }).addTo(map);
+      } else {
+        state.userMarker.setLatLng([lat, lon]);
+      }
+      clearPointWindowTrack();
+      setAgentStatus("location set");
+    }
+
+    function clearAgentHighlight() {
+      if (state.agentHighlight) {
+        map.removeLayer(state.agentHighlight);
+        state.agentHighlight = null;
+      }
+      if (state.agentHighlightLabel) {
+        map.removeLayer(state.agentHighlightLabel);
+        state.agentHighlightLabel = null;
+      }
+    }
+
+    function clearAgentScan() {
+      if (state.agentScan) {
+        map.removeLayer(state.agentScan);
+        state.agentScan = null;
+      }
+      if (state.agentScanLabel) {
+        map.removeLayer(state.agentScanLabel);
+        state.agentScanLabel = null;
+      }
+    }
+
+    function drawAgentScan(highlight, action) {
+      clearAgentScan();
+      clearAgentHighlight();
+      if (!highlight || typeof highlight.lat !== "number" ||
+          typeof highlight.lon !== "number") {
+        return;
+      }
+      var kind = highlight.kind || action || "view";
+      var color = agentActionColor(kind);
+      var pointAction = action && action.indexOf("point-") === 0;
+      var minRadius = pointAction ? POINT_SCAN_RADIUS_M : 90;
+      state.agentScan = L.circle([highlight.lat, highlight.lon], {
+        radius: Math.max(minRadius, highlight.radiusM || minRadius),
+        color: color,
+        weight: 3,
+        opacity: 0.72,
+        fillColor: color,
+        fillOpacity: 0.08,
+        interactive: false,
+        className: "lm-agent-scan-circle"
+      }).addTo(map);
+      var scanLabel = action === "point-sun" ? "Checking sun windows..."
+        : action === "point-shade" ? "Checking shade windows..."
+        : action === "point-light" ? "Checking light windows..."
+        : action === "point-open" ? "Checking open-place windows..."
+        : action === "point-lit-open" ? "Checking light + activity..."
+        : kind === "bright" ? "Checking light signals..."
+        : kind === "shade" ? "Checking shade signals..."
+        : "Reading this view...";
+      state.agentScanLabel = L.marker([highlight.lat, highlight.lon], {
+        interactive: false,
+        icon: L.divIcon({
+          className: "lm-agent-scan-label",
+          iconSize: [156, 24],
+          iconAnchor: [78, 28],
+          html: (
+            '<div style="display:inline-block;background:rgba(255,255,255,0.94);'
+            + 'color:#1e293b;border:1px solid rgba(148,163,184,0.45);'
+            + 'border-radius:6px;padding:5px 9px;font-size:12px;'
+            + 'font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,0.18);">'
+            + scanLabel + '</div>'
+          )
+        })
+      }).addTo(map);
+      map.panTo([highlight.lat, highlight.lon], { animate: true });
+    }
+
+    function agentHighlightLabelIcon(label) {
+      return L.divIcon({
+        className: "lm-agent-highlight-label",
+        iconSize: [150, 24],
+        iconAnchor: [75, 28],
+        html: (
+          '<div style="display:inline-block;background:rgba(15,23,42,0.88);'
+          + 'color:#fff;border-radius:6px;padding:5px 9px;font-size:12px;'
+          + 'font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,0.24);">'
+          + escapeHtml(label || "Selected area") + '</div>'
+        )
+      });
+    }
+
+    function syncAgentHighlightToSlot() {
+      var kind = state.pointWindowKind;
+      if (kind !== "shade" && kind !== "sun") return;
+      if (!state.pointWindowAnalysis) return;
+      var slot = currentAnalysisSlot(state.pointWindowAnalysis);
+      if (!slot) return;
+      var coverage = kind === "sun" ? slot.brightCoverage : slot.coverage;
+      var label = kind === "sun"
+        ? "Sun " + formatPct(coverage) + " at " + formatHour(slot.slot)
+        : "Shadow " + formatPct(coverage) + " at " + formatHour(slot.slot);
+      if (state.agentHighlight) {
+        state.agentHighlight.setStyle({
+          fillOpacity: 0.08 + Math.max(0, Math.min(1, coverage)) * 0.28
+        });
+      }
+      if (state.agentHighlightLabel) {
+        state.agentHighlightLabel.setIcon(agentHighlightLabelIcon(label));
+      }
+    }
+
+    function drawAgentHighlight(highlight, action) {
+      if (!highlight || typeof highlight.lat !== "number" ||
+          typeof highlight.lon !== "number") {
+        return;
+      }
+      clearAgentScan();
+      clearAgentHighlight();
+      var kind = highlight.kind || action || "view";
+      var color = agentActionColor(kind);
+      var intensity = typeof highlight.coverage === "number"
+        ? Math.max(0, Math.min(1, highlight.coverage))
+        : null;
+      var fillOpacity = intensity === null ? 0.18 : 0.08 + intensity * 0.28;
+      state.agentHighlight = L.circle([highlight.lat, highlight.lon], {
+        radius: highlight.radiusM || 180,
+        color: color,
+        weight: 3,
+        opacity: 0.95,
+        fillColor: color,
+        fillOpacity: fillOpacity,
+        interactive: false
+      }).addTo(map);
+      var label = highlight.label || "Recommended area";
+      state.agentHighlightLabel = L.marker([highlight.lat, highlight.lon], {
+        interactive: false,
+        icon: agentHighlightLabelIcon(label)
+      }).addTo(map);
+      map.panTo([highlight.lat, highlight.lon], { animate: true });
+    }
+
+    function runAgentAction(action) {
+      var question = actionQuestion(action);
+      var context = collectAgentContext(action);
+      var preview = context.candidates && context.candidates.length
+        ? context.candidates[0] : null;
+      var runId = state.agentRunId + 1;
+      state.agentRunId = runId;
+      var startedAt = Date.now();
+      setAgentBusy(action, true);
+      setAgentStatus("working...");
+      setAgentAnswer("Scanning the current map evidence...");
+      drawAgentScan(preview, action);
+      fetch("/api/agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: question,
+          context: context
+        })
+      })
+        .then(function(resp) {
+          return resp.json().then(function(data) {
+            return { ok: resp.ok, status: resp.status, data: data };
+          });
+        })
+        .then(function(result) {
+          finishAgentRun(runId, startedAt, function() {
+            var source = result.data && result.data.source;
+            setAgentStatus(source === "openai" ? "AI agent" : "local agent");
+            if (!result.ok) {
+              if (preview) drawAgentHighlight(preview, action);
+              setAgentAnswer(result.data.error || "Agent request failed.");
+              return;
+            }
+            var highlight = result.data.highlight || preview;
+            if (highlight) {
+              drawAgentHighlight(highlight, action);
+            }
+            setAgentAnswer(
+              result.data.answer || "The agent returned no answer."
+            );
+          });
+        })
+        .catch(function() {
+          finishAgentRun(runId, startedAt, function() {
+            setAgentStatus("local agent");
+            if (preview) drawAgentHighlight(preview, action);
+            setAgentAnswer(
+              "Highlighted a local candidate. Start scripts/serve_agent.py from localhost for the full agent answer."
+            );
+          });
+        });
+    }
+
+    function runPointSunAction(action) {
+      if (!state.userLocation) {
+        var center = map.getCenter();
+        setAgentLocation(center.lat, center.lng, null, "map center");
+      }
+      var loc = state.userLocation;
+      var kind = action === "point-sun" ? "sun" : "shade";
+      var runId = state.agentRunId + 1;
+      state.agentRunId = runId;
+      var startedAt = Date.now();
+      var preview = {
+        lat: loc.lat,
+        lon: loc.lon,
+        radiusM: POINT_CHECK_RADIUS_M,
+        label: kind === "sun" ? "Checking sun" : "Checking shade",
+        kind: kind
+      };
+      setAgentBusy(action, true);
+      setAgentStatus("working...");
+      setAgentAnswer(
+        kind === "sun"
+          ? "Scanning day-sun windows for this point..."
+          : "Scanning building-shade windows for this point..."
+      );
+      drawAgentScan(preview, action);
+      requestAnimationFrame(function() {
+        var analysis = analyzePointSun(loc.lat, loc.lon);
+        var best = kind === "sun"
+          ? analysis.bestBright : analysis.bestShade;
+        finishAgentRun(runId, startedAt, function() {
+          setAgentStatus("computed");
+          if (best) {
+            state.slot = best.slot;
+            rangeEl.value = best.slot;
+            updateScene();
+          }
+          drawAgentHighlight({
+            lat: loc.lat,
+            lon: loc.lon,
+            radiusM: POINT_CHECK_RADIUS_M,
+            label: best
+              ? (kind === "sun"
+                  ? "Sun " + formatPct(best.brightCoverage)
+                    + " at " + formatHour(best.slot)
+                  : "Shadow " + formatPct(best.coverage)
+                    + " at " + formatHour(best.slot))
+              : (kind === "sun" ? "No day sun" : "No building shade"),
+            kind: kind,
+            coverage: best
+              ? (kind === "sun" ? best.brightCoverage : best.coverage)
+              : 0
+          }, kind);
+          renderPointWindowTrack(analysis, kind, best);
+          setAgentAnswer(pointSunSummary(analysis, kind));
+        });
+      });
+    }
+
+    function runPointNightAction(action) {
+      if (!state.userLocation) {
+        var center = map.getCenter();
+        setAgentLocation(center.lat, center.lng, null, "map center");
+      }
+      var loc = state.userLocation;
+      var kind = action === "point-light" ? "light"
+        : action === "point-open" ? "open"
+        : "lit-open";
+      var runId = state.agentRunId + 1;
+      state.agentRunId = runId;
+      var startedAt = Date.now();
+      var preview = {
+        lat: loc.lat,
+        lon: loc.lon,
+        radiusM: POINT_CHECK_RADIUS_M,
+        label: kind === "light" ? "Checking light"
+          : kind === "open" ? "Checking open places"
+          : "Checking overlap",
+        kind: kind
+      };
+      setAgentBusy(action, true);
+      setAgentStatus("working...");
+      setAgentAnswer(
+        kind === "light" ? "Scanning night-light windows for this area..."
+          : kind === "open" ? "Scanning nearby open-place windows..."
+          : "Scanning light and activity overlap..."
+      );
+      drawAgentScan(preview, action);
+      requestAnimationFrame(function() {
+        var analysis = analyzePointNight(loc.lat, loc.lon, kind);
+        var best = analysis.best;
+        finishAgentRun(runId, startedAt, function() {
+          setAgentStatus("computed");
+          renderPointWindowTrack(analysis, kind, best);
+          if (best) {
+            state.slot = best.slot;
+            rangeEl.value = best.slot;
+            updateScene();
+          }
+          drawAgentHighlight({
+            lat: loc.lat,
+            lon: loc.lon,
+            radiusM: POINT_CHECK_RADIUS_M,
+            label: best
+              ? (kind === "light" ? "Lit at " + formatHour(best.slot)
+                : kind === "open" ? "Open nearby at " + formatHour(best.slot)
+                : "Light + open at " + formatHour(best.slot))
+              : (kind === "light" ? "No nearby light"
+                : kind === "open" ? "No nearby open places"
+                : "No overlap tonight"),
+            kind: kind
+          }, kind);
+          setAgentAnswer(pointNightSummary(analysis, kind));
+        });
+      });
+    }
+
+    var agentChips = document.querySelectorAll(".lm-agent-chip");
+    for (var ac = 0; ac < agentChips.length; ac++) {
+      agentChips[ac].addEventListener("click", function() {
+        var action = this.getAttribute("data-action") || "view";
+        if (action === "point-shade" || action === "point-sun") {
+          runPointSunAction(action);
+        } else if (action === "point-light" || action === "point-open" ||
+                   action === "point-lit-open") {
+          runPointNightAction(action);
+        } else if (action === "shade" || action === "bright") {
+          ensureReferenceLocation(function() { runAgentAction(action); });
+        } else {
+          runAgentAction(action);
+        }
+      });
+    }
+    map.on("click", function(e) {
+      setAgentLocation(e.latlng.lat, e.latlng.lng, null, "map pin");
+      setAgentAnswer("Point selected.");
+    });
 
     // Pan or zoom changes the viewport, so the culled shadow set must
     // be recomputed. moveend fires once at the end of a gesture.
@@ -2407,8 +3911,10 @@ def build_time_slider_map(target_time, scale_pct):
       }
     });
 
+    loadCurrentBostonTime();
     updateSunMarkers();
     updateScene();
+    fetchWeather(state.dateStr);
   }
 
   if (document.readyState === "loading") {
@@ -2424,6 +3930,8 @@ def build_time_slider_map(target_time, scale_pct):
                  json.dumps(js_buildings, separators=(",", ":")))
         .replace("__POIS__",
                  json.dumps(osm_pois, separators=(",", ":")))
+        .replace("__LIGHT_POINTS__",
+                 json.dumps(coords, separators=(",", ":")))
         .replace("__TREES_PNG_URL__", _trees_png_relpath)
         .replace("__TREES_BBOX__",
                  json.dumps(trees_png_bbox, separators=(",", ":")))
@@ -2434,6 +3942,16 @@ def build_time_slider_map(target_time, scale_pct):
         .replace("__HEAT_TMAX_F__", str(HEAT_TMAX_F))
         .replace("__HEAT_APPARENT_F__", str(HEAT_APPARENT_F))
         .replace("__HEAT_UV__", str(HEAT_UV))
+        .replace("__STATIC_COUNTS__", json.dumps({
+            "buildings": building_count,
+            "trees": len(trees_static),
+            "streetlights": len(coords),
+            "venues": len(osm_pois),
+            "emergencyRooms": sum(1 for m in medical if m.get("is_er")),
+            "coolingOptions": len(cooling),
+            "historicIncidents": len(crime_points),
+            "violentIncidentPins": len(violent_crime),
+        }, separators=(",", ":")))
         .replace("__MAP_NAME__", m.get_name())
         .replace("__DARK_NAME__", dark_tiles.get_name())
         .replace("__STREET_NAME__", streetlight_group.get_name())
@@ -2456,18 +3974,18 @@ def build_time_slider_map(target_time, scale_pct):
         f'<span style="color:#64748b;">{date_str}</span>',
         f"{building_count:,} buildings &middot; {len(trees_static):,} "
         "trees (static) &middot; {:,} venues".format(len(osm_pois)),
-        f'<span style="color:#94a3b8; font-size:11px;">Incident reference: '
+        f'<span style="color:#94a3b8; font-size:12px;">Incident reference: '
         f'{len(crime_points):,} incidents + {len(violent_crime):,} '
         f'violent-crime pins (2yr, optional)</span>',
-        '<span id="lm-weather" style="color:#64748b; font-size:11px;">'
+        '<span id="lm-weather" style="color:#64748b; font-size:12px;">'
         "Loading weather...</span>"
         '<span id="lm-heat-badge" style="display:none; margin-left:8px; '
         'background:#dc2626; color:#fff; padding:2px 8px; border-radius:10px; '
-        'font-size:10px; font-weight:700; letter-spacing:0.4px;">HEAT</span>',
-        '<span style="color:#94a3b8; font-size:11px;">Heat-response: '
+        'font-size:11px; font-weight:700; letter-spacing:0.4px;">HEAT</span>',
+        '<span style="color:#94a3b8; font-size:12px;">Heat-response: '
         f'{sum(1 for m in medical if m.get("is_er")):,} 24h ER + '
         f'{len(cooling):,} cooling (proxy)</span>',
-        '<span style="color:#64748b; font-size:11px;">'
+        '<span style="color:#64748b; font-size:12px;">'
         "Drag time or pick a date. Venues toggle on/off by their "
         "real opening hours.</span>",
     ])
