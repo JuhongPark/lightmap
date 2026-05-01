@@ -41,8 +41,8 @@ Use these planning docs as the source of truth for future work:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m unittest tests.test_shadow tests.test_loaders
-PYTHONPATH=src .venv/bin/python src/prototype.py --time-slider --out prototype_timeslider.html --scale 1
-PYTHONPATH=src .venv/bin/python src/prototype.py --time-slider --out prototype_timeslider.html --scale 100
+PYTHONPATH=src .venv/bin/python src/prototype.py --time-slider --out LightMap.html --scale 1
+PYTHONPATH=src .venv/bin/python src/prototype.py --time-slider --out LightMap.html --scale 100
 ```
 
 The full unittest discovery includes a Playwright/local-socket render smoke test,

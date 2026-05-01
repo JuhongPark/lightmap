@@ -2,7 +2,7 @@
 
 > Shade by day. Light by night.
 
-**Live demo:** [Interactive time slider](https://juhongpark.github.io/lightmap/prototype_timeslider.html) — scrub through any date and time. Shadows sweep with the sun, basemap fades from dark to light as the sun rises, streetlights switch on at dusk, and historic incident records are available as an optional night reference layer.
+**Live demo:** [LightMap](https://juhongpark.github.io/lightmap/LightMap.html) — scrub through any date and time. Shadows sweep with the sun, twilight phases mark dawn and dusk, and streetlights plus active venue signals switch on at night.
 
 An interactive web map that shows where shade falls during the day and where light shines at night in Boston and Cambridge, MA. Uses real-time sun position, building geometry, streetlight locations, and tree canopy data.
 
@@ -14,7 +14,7 @@ Built by **Juhong Park** (System Design and Management, MIT) as a term project f
 | --- | --- |
 | <img src="docs/screenshots/day.png" width="400"> | <img src="docs/screenshots/night.png" width="400"> |
 
-123K buildings with moving shadows and ~59K tree-canopy crowns as static shade context (day). 80K streetlights as a bright-yellow heatmap with ~760 time-gated OSM venue dots (night). Historic incidents stay available as a reference layer rather than the main story.
+123K buildings with moving shadows and ~59K tree-canopy crowns as static shade context (day). 80K streetlights as a bright-yellow heatmap with ~760 time-gated OSM venue dots (night).
 
 ### How It Works
 
@@ -145,10 +145,10 @@ Converts the raw GeoJSON into a compact `data/buildings.db` with WKB blobs and a
 The time-slider is the single production artifact. Build it with:
 
 ```
-.venv/bin/python src/prototype.py --time-slider --out prototype_timeslider.html --scale 100
+.venv/bin/python src/prototype.py --time-slider --out LightMap.html --scale 100
 ```
 
-Opens `docs/prototype_timeslider.html` in your browser. On load, the slider resets to the current Boston date and the nearest past hourly slot. During the day, building shadows move with the sun and a static green tree-canopy overlay fills in the rest of the shade. Click a point to ask when the local 17 m check ring is covered by building shadow or open to direct sun. After sunset the basemap fades dark, the streetlight heatmap switches on as a bright-yellow glow, and OSM venues turn on one by one based on their real `opening_hours` tag. Historic incident records can be toggled on as reference context. Weather and UV for the selected date are fetched live from Open-Meteo. Auto-play advances one slot per second.
+Opens `docs/LightMap.html` in your browser. On load, the slider resets to the current Boston date and the nearest past hourly slot. During the day, building shadows move with the sun and a static green tree-canopy overlay fills in the rest of the shade. Click a point to ask when the local 17 m check ring is covered by building shadow or open to direct sun. Dawn and dusk use a distinct twilight theme. After sunset the basemap turns dark, the streetlight heatmap switches on as a bright-yellow glow, and OSM venues turn on one by one based on their real `opening_hours` tag. Weather and UV for the selected date are fetched live from Open-Meteo. Auto-play advances one slot per second.
 
 Available flags:
 
@@ -156,7 +156,7 @@ Available flags:
 | --- | --- |
 | `--time-slider` | Build the interactive time-slider HTML. This is the only supported output. |
 | `--scale N` | Percent of data to render. Valid values: 0, 1, 10, 50, 100. Default 1. Use 100 for the shipping build. |
-| `--out NAME` | Output filename under `docs/`. Default `prototype.html`, so always pass `--out prototype_timeslider.html` for the time-slider. |
+| `--out NAME` | Output filename under `docs/`. Default `LightMap.html` for the time-slider. |
 | `--time "YYYY-MM-DD HH:MM"` | Starting timestamp the slider opens at. |
 
 ### 5. Run tests
@@ -170,7 +170,7 @@ PYTHONPATH=src .venv/bin/python -m unittest discover tests
 The time-slider can call a local agent endpoint for map-bound night-lighting
 answers. Day shade and day sun windows are computed directly in the browser
 from the selected point and building shadows. The API key stays on the local
-server and is never embedded in `docs/prototype_timeslider.html`.
+server and is never embedded in `docs/LightMap.html`.
 
 Paste the key into `.env`:
 
@@ -189,7 +189,7 @@ Start the local server:
 Then open:
 
 ```
-http://localhost:8765/prototype_timeslider.html
+http://localhost:8765/LightMap.html
 ```
 
 Optional settings:
@@ -224,7 +224,7 @@ Creates the schema, inserts 123K buildings, builds a GiST spatial index, and ena
 ### 3. Build the time-slider at 100% scale
 
 ```
-.venv/bin/python src/prototype.py --time-slider --out prototype_timeslider.html --scale 100
+.venv/bin/python src/prototype.py --time-slider --out LightMap.html --scale 100
 ```
 
 The code automatically detects the PostGIS container and uses it for the 100% path. Set the environment variable `LIGHTMAP_NO_POSTGIS=1` to force the pure Python fallback.

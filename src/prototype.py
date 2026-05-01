@@ -4369,10 +4369,11 @@ def build_map(target_time, scale_pct=1, dual=False, time_compare=False,
     os.makedirs(OUT_DIR, exist_ok=True)
     # Each strategy writes to its own HTML file so benchmark runs can
     # generate the full matrix without clobbering each other. The
-    # default (no --render-strategy) still writes prototype.html to
-    # preserve the historical convention.
+    # time-slider writes the public LightMap artifact by default.
     if out_filename is None:
-        if render_strategy == DEFAULT_RENDER_STRATEGY:
+        if time_slider:
+            out_filename = "LightMap.html"
+        elif render_strategy == DEFAULT_RENDER_STRATEGY:
             out_filename = "prototype.html"
         else:
             out_filename = f"prototype_{render_strategy}.html"
@@ -4411,7 +4412,7 @@ def build_map(target_time, scale_pct=1, dual=False, time_compare=False,
 
 
 def main():
-    parser = argparse.ArgumentParser(description="LightMap prototype")
+    parser = argparse.ArgumentParser(description="LightMap")
     parser.add_argument(
         "--time", type=str, default="2026-04-20 14:00",
         help="Target time (YYYY-MM-DD HH:MM)",
@@ -4445,8 +4446,8 @@ def main():
     )
     parser.add_argument(
         "--out", default=None,
-        help="Output filename under docs/. Defaults to prototype.html for "
-             "the default strategy and prototype_<key>.html otherwise.",
+        help="Output filename under docs/. Defaults to LightMap.html for "
+             "the time-slider.",
     )
     args = parser.parse_args()
 
