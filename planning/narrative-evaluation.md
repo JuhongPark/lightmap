@@ -37,7 +37,7 @@ Recent direction has narrowed the story:
 - Use LightTime Agent as the agent name.
 - Lead with daytime shadow first.
 - Make the day-night theme transition visible but not harsh.
-- Keep UI labels simple: Shadow Time, Sunny Time, Active Time, Inactive Time.
+- Keep UI labels simple: Shade Time, Sunny Time, Active Time, Inactive Time.
 - Keep the demo focused on the current day-night controls.
 - Night should use objective inputs: streetlights and currently open venues.
 - The night activity score should be simple and explainable.

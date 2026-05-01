@@ -27,7 +27,7 @@ LightMap is the product. LightTime Agent is the helper layer.
 
 The agent should be triggered by buttons:
 
-- `Shadow Time`
+- `Shade Time`
 - `Sunny Time`
 - `Active Time`
 - `Inactive Time`
@@ -37,7 +37,7 @@ state is enough context.
 
 ## Daytime Agent
 
-### Shadow Time
+### Shade Time
 
 Input:
 

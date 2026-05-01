@@ -40,7 +40,7 @@ Keep these proposal elements alive:
 - The public artifact is `docs/LightMap.html`.
 - LightMap is the product name.
 - LightTime Agent is the button-driven helper inside the app.
-- Daytime controls are `Shadow Time` and `Sunny Time`.
+- Daytime controls are `Shade Time` and `Sunny Time`.
 - Nighttime controls are `Active Time` and `Inactive Time`.
 - Day labels use a blue shadow percentage at the selected point.
 - Night labels use open-venue activity with warmer orange color.
@@ -82,7 +82,7 @@ Keep these proposal elements alive:
    computation, Folium and Leaflet, browser-side time interaction.
 
 6. **LightTime Agent**
-   The agent is a set of direct actions: Shadow Time, Sunny Time, Active Time,
+   The agent is a set of direct actions: Shade Time, Sunny Time, Active Time,
    and Inactive Time.
 
 7. **Decision Criteria**
@@ -107,7 +107,7 @@ Keep these proposal elements alive:
 2. Show the current time loading to the nearest previous hour.
 3. Drag the slider through day hours and show blue shadows moving.
 4. Click a point and show the dynamic shadow percentage label.
-5. Use `Shadow Time` and `Sunny Time` to show the LightTime Agent answer.
+5. Use `Shade Time` and `Sunny Time` to show the LightTime Agent answer.
 6. Move into Dusk and Night so the theme transition is visible.
 7. Show streetlights and open venues becoming the night evidence.
 8. Use `Active Time` and `Inactive Time` to show the night agent answer.
@@ -188,7 +188,7 @@ benchmark. The strong claim is architectural: object rebuild left the hot path.
 - "Brightness and visibility context."
 - "Open-place activity from public venue hours."
 - "LightTime Agent."
-- "Shadow Time."
+- "Shade Time."
 - "Sunny Time."
 - "Active Time."
 - "Inactive Time."

@@ -40,7 +40,7 @@ not a safety predictor.
 
 ## Current UI Direction
 
-- Daytime actions: `Shadow Time` and `Sunny Time`.
+- Daytime actions: `Shade Time` and `Sunny Time`.
 - Nighttime actions: `Active Time` and `Inactive Time`.
 - Day colors: blue shadow overlay and blue shadow percentage.
 - Night colors: soft warm orange activity treatment and yellow light context.

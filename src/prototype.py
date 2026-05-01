@@ -2113,7 +2113,7 @@ def build_time_slider_map(target_time, scale_pct):
     <div class="lm-agent-section">
       <div class="lm-agent-section-title">Daytime</div>
       <button class="lm-agent-chip" data-action="point-shade" type="button">
-        Shadow Time
+        Shade Time
       </button>
       <button class="lm-agent-chip" data-action="point-sun" type="button">
         Sunny Time
@@ -4284,7 +4284,7 @@ def build_time_slider_map(target_time, scale_pct):
         playIconEl.textContent = "\u25B6";
       } else {
         if (state.slot >= TIMELINE_END_SLOT) return;
-        // Fixed 1 s cadence regardless of per-slot render cost.
+        // Fixed 0.5 s cadence regardless of per-slot render cost.
         state.playTimer = setInterval(function() {
           if (state.slot >= TIMELINE_END_SLOT) {
             clearInterval(state.playTimer);
@@ -4295,7 +4295,7 @@ def build_time_slider_map(target_time, scale_pct):
           }
           state.slot += 1;
           updateScene();
-        }, 1000);
+        }, 500);
         state.playing = true;
         playIconEl.textContent = "\u23F8";
       }
