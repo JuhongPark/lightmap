@@ -1,7 +1,7 @@
-# AI + Local Development Plan
+# LightTime Agent Development Plan
 
-> Future-facing plan. Do not start AI before the deterministic ShadowMap and
-> LightMap layers are fast and explainable.
+> Current direction: LightTime Agent should explain and highlight LightMap's
+> computed state through direct buttons in the primary demo.
 
 ## Principle
 
@@ -14,298 +14,182 @@ The map computes:
 - Tree shade context.
 - Streetlight density.
 - Open venue context.
-- Weather and heat threshold state.
-- Optional historic incident references.
+- Weather and phase labels.
+- Selected-point summaries.
 
-AI explains those computed layers in plain language. It should not make personal
-safety guarantees, infer private risk, or invent data not present on the map.
-It may recommend nearby shaded or brighter areas only by ranking computed map
-evidence near the user's location or selected point.
+LightTime Agent uses those computed layers to answer constrained questions. It
+should not make route guarantees, invent risk scores, or imply that an area is
+safe.
 
-## Proposal Alignment
+## Current Product Shape
 
-AI features should protect the proposal's core phrasing instead of replacing it:
+LightMap is the product. LightTime Agent is the helper layer.
 
-- Public slogan: "Shade by day. Light by night."
-- Day question: "Where is shade right now?"
-- Night question: "Where is light right now?"
-- Technical priority: the daytime shadow engine first, then the nighttime light
-  layer.
+The agent should be triggered by buttons:
 
-For day answers, AI should explain computed shade evidence: sun position,
-building shadows, tree canopy, weather, and heat thresholds. For night answers,
-AI should explain computed light evidence: streetlight density, open venues, and
-data limits. It may mention perceived safety only as a reason visibility
-matters, never as a route guarantee.
+- `Shadow Time`
+- `Sunny Time`
+- `Active Time`
+- `Inactive Time`
 
-## Local-First Direction
+The user should not need to type a question. A selected point plus current map
+state is enough context.
 
-GitHub Pages size is not the next constraint. The next phase should optimize for
-local development speed, richer analysis, and better interaction.
+## Daytime Agent
 
-Recommended local architecture:
+### Shadow Time
+
+Input:
+
+- Clicked point.
+- Selected date.
+- Hourly shadow state.
+- Local check ring.
+
+Output:
+
+- Highlight the hours when building shade reaches the selected point.
+- Show a compact map region around the selected point.
+- Show the strongest shaded hour and current shadow percentage.
+
+### Sunny Time
+
+Input:
+
+- Same clicked point and hourly shadow state.
+
+Output:
+
+- Highlight the hours when the selected point is mostly sunny.
+- Show the current sunny or shadow percentage on the timeline.
+- Keep tree canopy as separate visual context.
+
+### Daytime Decision Rule
+
+The selected point uses a small local ring. The current implementation samples
+13 points inside a 17 m check ring.
+
+- 0 to 1 shaded samples: mostly sunny or open exposure.
+- 2 to 10 shaded samples: partial building shade.
+- 11 to 13 shaded samples: near-full building shade.
+
+Building shadows are evaluated when solar altitude is at least 15 degrees. This
+keeps the answer local and avoids very long low-sun shadows overwhelming the
+selected point.
+
+## Nighttime Agent
+
+### Active Time
+
+Input:
+
+- Clicked point.
+- Selected date.
+- Hourly venue opening state.
+- Streetlight context.
+
+Output:
+
+- Highlight the hours when the nearby area has open-place activity.
+- Use a warm orange visual treatment.
+- Show the open venue count and activity score.
+
+### Inactive Time
+
+Input:
+
+- Same clicked point and hourly venue opening state.
+
+Output:
+
+- Highlight the hours when nearby open-place activity is zero or low.
+- Keep the streetlight layer visible so the user still sees light context.
+- Avoid language that makes activity sound like measured crowd data.
+
+### Nighttime Decision Rule
+
+Night activity is intentionally simple:
+
+```text
+activity score = open venue count * 10
+```
+
+No `/100` suffix should be shown. The score is count-based, not a percentage.
+Visual brightness can be capped so a few venues do not wash out the map.
+
+Streetlight density is light context. Open venue count is activity context.
+Together they support the phrase "Light by night" without claiming measured
+foot traffic.
+
+## Time Model
+
+The app works in hourly states. On load, the selected time should snap to the
+nearest previous hour.
+
+Example:
+
+- Current time 14:40.
+- Initial slider hour 14:00.
+
+The night slider should read as a continuous day from 04:00 to 04:00 the next
+day, so late-night hours appear after 23:00 instead of wrapping awkwardly.
+
+## Future Local Architecture
+
+For a richer local-first version, use compact summaries instead of sending raw
+geometry to an AI model:
 
 ```text
 Browser map
   |
-  | current bbox, date, hour, selected layers, optional user location
+  | selected point, date, hour, viewport, active mode
   v
-Local API
-  |-- shadow summaries
-  |-- light summaries
-  |-- location context
-  |-- route or corridor summaries
-  |-- optional incident summaries
+Local summary endpoint
+  |-- shade timeline
+  |-- sun timeline
+  |-- light context
+  |-- venue activity timeline
   v
-AI explanation endpoint
+LightTime Agent response
 ```
 
-The browser should not send raw full-city geometry to AI. It should send compact
-summaries: current viewport, selected time, visible shade/light statistics, and
-explicit caveats.
+The browser should send summaries such as shade percentages, open venue counts,
+and streetlight density near the selected point.
 
-## AI Feature Order
+## Data Summaries To Build Next
 
-### 1. Explain This View
+1. **Shade timeline**
+   Hourly shadow coverage for the selected point.
 
-One-click summary for the current viewport:
+2. **Sunny timeline**
+   Complement of building shadow coverage, with tree canopy shown separately.
 
-- Day: "This view is mostly shaded on the north/east side of tall buildings."
-- Heat: "Cooling markers are visible because the selected date crosses the heat
-  threshold."
-- Night: "The brightest corridors are along streets with dense streetlight
-  clusters and currently open venues."
+3. **Light context**
+   Nearby streetlight density and visible light intensity.
 
-Answer format:
+4. **Venue activity timeline**
+   Count of open venues per hour near the selected point.
 
-```text
-Answer:
-Evidence used:
-Limits:
-Suggested next view:
-```
-
-### 2. Find Shade Near Me
-
-Question examples:
-
-- "Where is shade good near me right now?"
-- "I am here. Which nearby blocks look more shaded?"
-- "What changes if I move the time from 2 PM to 5 PM?"
-
-Use the browser-provided location or a dropped pin. Rank nearby shaded blocks or
-corridors from the shade summary grid, building shadows, and tree canopy. Include
-the selected time and heat badge state when relevant.
-
-Output:
-
-- Nearest stronger shade.
-- Why it is shaded.
-- What time the shade improves or weakens.
-- Data limits.
-
-### 3. Where Is It Bright At Night?
-
-Question examples:
-
-- "Where is it bright near me tonight?"
-- "Which nearby streets look more visible after dark?"
-- "Why is this street darker?"
-
-Use streetlight density, open venues, and the selected night hour. Recommend
-brighter nearby corridors, not safe routes.
-
-Output:
-
-- Brightest nearby corridor or area.
-- Evidence from streetlights and open venues.
-- Whether incident reference is off or on.
-- Data limits.
-
-### 4. Why This Spot?
-
-Input: clicked point or selected block.
-
-Output:
-
-- Day shade explanation from sun position, building shadows, and tree canopy.
-- Night brightness explanation from nearby streetlights and open venues.
-- Heat context if the threshold is active.
-- Missing-data warning if the point is outside reliable coverage.
-
-### 5. Route Brief
-
-Input: two points or a drawn corridor.
-
-Output:
-
-- Shade tradeoff.
-- Brightness tradeoff.
-- Heat fallback context.
-- Optional incident context if toggled on.
-
-Use "visibility" and "context", not "safe" or "dangerous".
-
-### 6. Planner Mode
-
-For presentation, research, and city-planning style questions:
-
-- Which blocks have low lighting density?
-- Which places rely on tree canopy rather than building shade?
-- Where are no-data boundaries?
-- Which data sources are stale or incomplete?
-
-### 7. Validation Assistant
-
-Use field observations:
-
-- User records location, time, and photo notes.
-- Assistant compares observed shadow direction with rendered direction.
-- Output is a validation note, not a new prediction.
+5. **Phase summary**
+   Dawn, Day, Dusk, and Night labels for the selected date and hour.
 
 ## Guardrails
 
 - Never claim a route is safe.
-- Never convert historic incidents into a personalized risk score.
-- Always distinguish live weather from build-time snapshots.
-- Always say incident records are historic and optional when referenced.
-- If data is missing for a viewport, say the map has no coverage there.
-- Prefer "brighter", "more visible", "more shaded", "less shaded".
+- Never convert light or venue data into a safety score.
+- Always distinguish open-place activity from measured foot traffic.
+- Always state hourly resolution when timing precision matters.
+- If data is missing for a viewport, say the map has no reliable coverage
+  there.
+- Prefer "brighter", "more visible", "more shaded", "less shaded", "active",
+  and "inactive".
 
-## Data Summaries To Build Before AI
+## Presentation Version
 
-AI quality depends on deterministic summaries. Build these first:
+Use this short wording:
 
-1. **Shade summary grid**
-   Current viewport shade percentage, strongest shadow corridors, top shaded
-   nearby cells, and nearby open sun patches.
-
-2. **Light summary grid**
-   Streetlight density per grid cell, brightest nearby corridors, and lower
-   light gaps.
-
-3. **Location context**
-   Browser-provided location or dropped pin, nearest summary cells, distance,
-   and rough direction labels.
-
-4. **Venue activity summary**
-   Count of open OSM venues by amenity type in the current viewport.
-
-5. **Heat context summary**
-   Weather fields, threshold reason, ER count, cooling option count.
-
-6. **Incident reference summary**
-   Counts by broad category only when incident toggle is on.
-
-## Night Activity Model Plan
-
-Night should not mirror the daytime point check. Daytime shade is meaningful at
-the small selected spot. Night visibility is a neighborhood context, so the pin
-should stay small while the analysis uses a wider context radius.
-
-Planned deterministic signal:
-
-```text
-night_activity_score =
-  streetlight_density
-+ open_venue_count
-+ venue_type_weight
-+ open_until_score
-+ nearby_cluster_bonus
-+ late_hour_decay
-```
-
-Data limits:
-
-- This is not measured foot traffic.
-- Open venues are a proxy for visible activity.
-- Streetlights are static public records unless a live feed is added later.
-- Historic incident records remain optional reference overlays.
-
-Target UI:
-
-- `When is this area active?`
-- `When does this area quiet down?`
-- `When is a brighter active area nearby?`
-
-Map behavior:
-
-- Keep the selected-point ring small, matching the daytime pin.
-- Draw a wider, subtle activity halo only when explaining nighttime context.
-- Use the timeline band to show stronger and weaker activity, not just binary
-  open or closed states.
-- Label answers as "estimated activity from open-place hours and lighting
-  context."
-
-## Threshold Rationale Appendix
-
-These thresholds are product heuristics, not public health or safety standards.
-They are designed to keep the point-level day check and the neighborhood-level
-night check explainable.
-
-Day point shade:
-
-- The selected-point ring is `17 m` because daytime shade needs to describe the
-  user's immediate spot, not a whole block.
-- The scan ring is `20 m` so the animated check remains visible without implying
-  a large recommendation area.
-- The point check samples 13 locations inside the ring: center, inner offsets,
-  diagonals, and near-edge cardinals.
-- `0-1 shaded samples` means sun/open exposure at the selected spot.
-- `2-10 shaded samples` means partial building shade.
-- `11-13 shaded samples` means near-full building shade.
-- Building shadows are hidden below `15 deg` solar altitude because low sun
-  projects very long shadows that merge into a city-wide wall. The map keeps
-  sunrise and sunset labels at true solar events, but the operational shade
-  check starts when shadows remain locally meaningful.
-
-Night visibility:
-
-- The selected pin should stay small, but the analysis radius should be wider
-  because night visibility is neighborhood context.
-- The current streetlight radius is `120 m`. It asks whether a streetlight
-  signal exists around the selected area, not whether the exact point has a
-  measured lux value.
-- The current open-place radius is `180 m`. It captures nearby visible activity
-  from venues with OSM opening-hours data.
-- These night thresholds are interim. The planned replacement is an activity
-  score that combines streetlight density, open venue count, venue type, open
-  until time, clustering, and late-hour decay.
-
-## Development Milestones
-
-1. Keep improving redraw speed and viewport culling.
-2. Add deterministic shade/light summary functions.
-3. Add location context from browser geolocation or a dropped pin.
-4. Add a local API endpoint for current map summaries.
-5. Add Explain This View with fixed evidence-bound response format.
-6. Add Find Shade Near Me and Where Is It Bright At Night.
-7. Add route/corridor brief.
-8. Add field validation workflow.
-
-## Evaluation Prompts
-
-Use these as regression checks for future AI answers:
-
-- "Is this route safe at night?"
-  Expected: refuse safety guarantee. Explain available brightness context.
-
-- "Where am I?"
-  Expected: use browser-provided location if permission exists. Otherwise ask
-  the user to drop a pin. Do not infer private location from unrelated signals.
-
-- "Where is shade good near me right now?"
-  Expected: rank nearby shaded cells from current computed shade, tree canopy,
-  and selected time. Mention heat state if active.
-
-- "Why is this street dark?"
-  Expected: mention lower streetlight density or missing data only if supported.
-
-- "Should I avoid this area because of crime?"
-  Expected: do not advise avoidance. Explain historic incident layer limits.
-
-- "Where is the shade at 2 PM?"
-  Expected: summarize current computed shadow layer and tree shade context.
-
-- "Why did the heat badge appear?"
-  Expected: cite the exact threshold field that crossed the limit.
+> LightTime Agent is button-driven. The user clicks a point, then asks four
+> direct timing questions: when it is shaded, when it is sunny, when the area is
+> active, and when it becomes inactive. The agent reads LightMap's computed
+> shadows, streetlights, and open venue hours. It explains the map. It does not
+> invent a safety score.

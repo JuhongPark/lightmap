@@ -1,20 +1,18 @@
 # LightMap Narrative Evaluation
 
 > Working critique for feedback alignment. This evaluates the current narrative
-> against the submitted proposal, recent user direction, and the current working
-> prototype.
+> against the submitted proposal, recent user direction, the professor rubric,
+> and the current LightMap artifact.
 
 ## Bottom Line
 
-The current narrative is now directionally correct, but it is still too
-technical in places. The best public-facing center is the original proposal
-line:
+The strongest public center remains:
 
 > Shade by day. Light by night.
 
-Everything else should support that line. The shadow engine, light layer,
-incident toggle, speed pass, and future AI work are evidence that the slogan is
-real, not replacement slogans.
+Everything else should prove that line. The moving shadow layer, night light
+layer, LightTime Agent buttons, and direct-canvas performance work are evidence
+that the slogan is real.
 
 ## Evidence Base
 
@@ -27,70 +25,65 @@ The proposal's strongest language is simple and user-centered:
 - Problem: "Two questions no map can answer today"
 - Day question: "Where is shade right now?"
 - Night question: "Where is light right now?"
-- Day user need: "The sun is intense. You want the shaded side."
-- Night user need: "Some streets are bright, others dark."
 - Technology frame: "Two pipelines, one map"
 - Risk frame: data freshness and speed
-- Next steps: shadow engine, nighttime light, trees + weather, deploy
 
 ### User Direction Evidence
 
 Recent direction has narrowed the story:
 
 - Keep the original catchphrase because it got a good reaction.
-- Do not replace it with a technical slogan.
-- The core is daytime shadow first, then nighttime light.
-- Night should focus on bright, visible places.
-- Incident history should be optional reference only.
-- Do not center comparisons with other maps yet.
-- GitHub Pages is not the current priority. Local growth, speed, AI, and
-  narrative matter more now.
-- Use a hot-afternoon personal hook, then broaden to the public-health meaning
-  of shade during heat.
-- The AI scope should be practical and map-bound: explain this view, find shade
-  near me, and identify brighter nearby streets at night.
+- Use LightMap as the product name.
+- Use LightTime Agent as the agent name.
+- Lead with daytime shadow first.
+- Make the day-night theme transition visible but not harsh.
+- Keep UI labels simple: Shadow Time, Sunny Time, Active Time, Inactive Time.
+- Keep the demo focused on the current day-night controls.
+- Night should use objective inputs: streetlights and currently open venues.
+- The night activity score should be simple and explainable.
 
-### Prototype Evidence
+### Current Artifact Evidence
 
-The current prototype supports the narrative with concrete artifacts:
+The current artifact supports the narrative with concrete behavior:
 
 - Day: building shadows move with the time slider.
-- Shade context: tree canopy is a static shade overlay.
-- Night: streetlight heatmap and time-aware venue dots show brighter activity
-  corridors.
-- Optional context: incidents are behind a toggle, not the default night story.
-- Speed: local Playwright smoke showed roughly 40 ms redraw for about 6.9K
+- Day point check: a small local ring reports shadow coverage percentage.
+- Shade context: tree canopy is shown separately.
+- Night: streetlight glow and time-aware venue dots show light context.
+- Night point check: open venues drive a count-based activity score.
+- Time: the slider starts from the nearest previous hourly tick.
+- Theme: Dawn, Day, Dusk, and Night have distinct visual states.
+- Agent: button-driven LightTime Agent actions update map overlays.
+- Performance: a local smoke check observed roughly 40 ms redraw for about 6.9K
   visible shadows after the direct-canvas pass.
 
 ## Evaluation
 
 | Criterion | Score | Assessment |
 | --- | ---: | --- |
-| Catchphrase fidelity | 9/10 | The docs now protect "Shade by day. Light by night." as the only public line. Remaining risk: internal technical terms can still leak into live explanation if not disciplined. |
-| Proposal alignment | 8/10 | The two questions, data pillars, two-pipeline frame, and risk story are restored. The current wording is more polished than the proposal, but slightly less vivid. |
-| Day-first structure | 8/10 | The demo starts with moving daytime shadows, which matches the project core. The narrative should keep the day demo as the first "wow" moment. |
-| Night-light framing | 8/10 | Night is now brightness/visibility first. The safety motivation can stay, but only as "why visibility matters", not as a safety claim. |
-| Incident handling | 9/10 | Optional historic reference is the right position. It should not appear early in the demo unless asked. |
-| Speed story | 9/10 | The speed improvement has a strong technical explanation and memorable line. Need to keep numbers labeled as local smoke, not benchmark. |
-| AI direction | 8.5/10 | The AI story is now presentation-ready: explain the current view, find nearby shade, and find brighter nearby streets at night. Remaining risk is implementation scope. |
-| Presentation energy | 8/10 | The hot-afternoon hook restores the proposal's plain-life language, and the public-health turn gives the project broader significance without changing the core claim. |
+| Catchphrase fidelity | 9/10 | The public line is stable and still matches the original proposal. |
+| Proposal alignment | 8/10 | The two questions, two-pipeline frame, and risk story remain intact. |
+| Day-first structure | 9/10 | The best demo moment is moving blue shadows and a point-level shade percentage. |
+| Night-light framing | 7.5/10 | The night story is now more objective, but it is less emotionally vivid than the day story. Keep it simple and avoid overclaiming. |
+| UI clarity | 8.5/10 | The renamed controls and phase labels are easier to present than typed prompts. |
+| Speed story | 9/10 | The direct-canvas change gives a strong Design and Effort proof point. |
+| Rubric fit | 8.5/10 | The current story can hit all criteria if the video shows the UI first and explains code second. |
 
 ## Current Strengths
 
-1. The project center is clearer: shade and light, not crime.
-2. The original catchphrase is protected.
-3. The speed breakthrough turns a risk slide into a credible accomplishment.
-4. AI is constrained to explanation, which fits the project better than making
-   predictive claims.
+1. The project center is clear: shade and light.
+2. The app has a memorable live interaction, not only a static map.
+3. The daytime model has an intuitive visual and quantitative answer.
+4. The night model now uses objective public inputs.
+5. The speed work gives the project a credible engineering story.
 
 ## Current Weaknesses
 
-1. The narrative can become too technical too soon.
-2. The night story is still emotionally weaker than the day story.
-3. The next risk is implementation scope. The first AI demo must stay narrow
-   enough to build from deterministic map summaries.
-4. The night story still needs a crisp demo moment that avoids sounding like a
-   safety predictor.
+1. The night story is still weaker than the day story.
+2. The presentation can become too technical if it leads with data sources.
+3. The activity score must be framed as a proxy, not measured foot traffic.
+4. The professor rubric puts 40 points on video quality, so the demo has to be
+   polished and concise.
 
 ## Recommended Recenter
 
@@ -100,58 +93,50 @@ Use this hierarchy:
    Shade by day. Light by night.
 
 2. **Human Need**
-   In the day, you want the shaded side. At night, you want to know which
-   streets are bright.
+   In the day, you want the shaded side. At night, you want visible, active
+   streets.
 
 3. **Public Data**
-   Buildings, trees, streetlights, venues, weather.
+   Buildings, trees, streetlights, venues, and weather.
 
 4. **Working Map**
-   Time slider shows the city changing across the day and night.
+   A time slider shows the city changing across day, twilight, and night.
 
 5. **Credibility**
-   The speed bottleneck was real. The direct-canvas pass made the demo feel
-   live.
+   The map feels live because moving shadows are painted directly onto a canvas.
 
-6. **AI Next**
-   AI does not decide what is safe. It explains the visible evidence, finds
-   nearby shade from the current location, and identifies brighter nearby
-   streets at night.
+6. **LightTime Agent**
+   The agent is a button layer that answers time questions from computed map
+   evidence.
 
 ## Better Presentation Spine
 
 ```text
 Shade by day. Light by night.
 
-On a hot afternoon, the useful question is simple:
-Where is shade right now?
+Most maps answer where a place is. LightMap answers what the street is like at
+this hour.
 
-That is a comfort question, but it is also a public-health question during
-extreme heat.
+During the day, the question is shade. LightMap combines sun position, building
+height, and tree canopy to show moving shadow across the city.
 
-After dark, the useful question changes:
-Where is light right now?
+At night, the question is light. LightMap combines streetlights and currently
+open venues to show brighter, more active areas.
 
-LightMap uses public city data to answer both questions on one time-aware map:
-buildings and trees for shade, streetlights and open venues for light.
+The hardest part was making the map feel live. The first version rebuilt
+thousands of map objects every time the slider moved. The current version
+computes the same shadows and paints them directly to one canvas.
 
-The hardest part was making the map feel live.
-The old version rebuilt thousands of map objects every time the slider moved.
-The new version computes the same shadows and paints them directly to canvas.
-
-That makes the next step possible:
-an AI assistant that explains the current view, finds stronger shade near the
-user, and identifies brighter nearby streets at night without inventing safety
-claims.
+LightTime Agent turns that computed map state into direct answers: when this
+point is shaded, when it is sunny, when this area is active, and when it becomes
+inactive.
 ```
 
 ## Decisions
 
-1. Open with the personal hot-afternoon shade hook, then broaden to walking,
-   running, and public health during heat.
-2. Keep safety motivation mostly in Q&A. In the main talk, use nighttime
-   brightness and visibility language.
-3. Present AI as the next local build, focused on Explain This View, Find Shade
-   Near Me, and Where Is It Bright At Night.
-4. Keep performance as a proof point inside the risk and mitigation slide unless
-   the presentation audience is technical.
+1. Open with the hot-afternoon shade need, then broaden to public-health value.
+2. Keep nighttime language around brightness, visibility, and activity.
+3. Present LightTime Agent as direct action buttons.
+4. Use the shadow percentage label as the main daytime proof point.
+5. Use open venue count and streetlight glow as the main nighttime proof point.
+6. Keep performance as the main Design and Effort proof point.
