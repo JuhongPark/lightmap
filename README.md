@@ -28,6 +28,26 @@ The shadow engine computes sun position (pvlib) and projects each building footp
 | 50% | <img src="docs/screenshots/day_50pct.png" width="360"> | <img src="docs/screenshots/night_50pct.png" width="360"> |
 | 100% | <img src="docs/screenshots/day_100pct.png" width="360"> | <img src="docs/screenshots/night_100pct.png" width="360"> |
 
+### LightTime Agent
+
+LightTime Agent is the button-driven assistant layer inside the time-slider.
+After the user clicks a point on the map, it answers four timing questions:
+
+- `Shade Time`: finds when the local check ring is covered by building shade.
+- `Sunny Time`: finds when the same point is open to direct sun.
+- `Active Time`: finds night slots with nearby open venues.
+- `Inactive Time`: finds night slots with little or no open-venue activity.
+
+The visible timing buttons use LightMap's computed map evidence: date, time,
+clicked point, building-shadow coverage, streetlight context, and OSM
+`opening_hours`. The UI draws a scan effect, moves the time slider to the
+selected slot, and highlights the checked area on the map.
+
+When the app is served through `scripts/serve_agent.py`, LightMap also exposes
+a local `/api/agent` endpoint for OpenAI-backed map explanations. The browser
+sends compact map context to the local server, and the OpenAI API key stays on
+the server. It is never embedded in `docs/LightMap.html`.
+
 ## Tech Stack
 
 | Layer | Technologies |
@@ -35,6 +55,7 @@ The shadow engine computes sun position (pvlib) and projects each building footp
 | Shadow engine | pvlib (sun position), Shapely (geometry projection) |
 | Map generation | folium (Leaflet-based interactive maps) |
 | Data pipeline | httpx, pandas, csv |
+| LightTime Agent | Browser map context, local `/api/agent`, OpenAI Responses API |
 | Base tiles | CARTO Positron (day), CARTO Dark Matter (night) |
 
 ## Data Sources
@@ -166,9 +187,9 @@ PYTHONPATH=src .venv/bin/python -m unittest discover tests
 
 ### Optional local AI agent
 
-The time-slider can call a local LightTime Agent endpoint for map-bound timing
-answers. The local server uses the OpenAI API with current map context, while
-the API key stays on the server and is never embedded in `docs/LightMap.html`.
+The time-slider can be served with a local LightTime Agent endpoint for
+OpenAI-backed map explanations. The four visible timing buttons still use
+LightMap's computed evidence so they remain fast and deterministic.
 
 Paste the key into `.env`:
 
