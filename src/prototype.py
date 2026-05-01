@@ -1163,28 +1163,15 @@ def build_time_slider_map(target_time, scale_pct):
                 if _in_bbox_latlon(p["lat"], p["lon"])]
     print(f"  Inside INITIAL_BBOX: {len(osm_pois)} POIs")
 
-    print("Loading emergency rooms...")
-    medical = [m for m in load_medical()
-               if _in_bbox_latlon(m["lat"], m["lon"])]
-    print(f"  Inside INITIAL_BBOX: {len(medical)} ERs")
-
     print("Loading cooling centers (proxy)...")
     cooling = [c for c in load_cooling_centers()
                if _in_bbox_latlon(c["lat"], c["lon"])]
     print(f"  Inside INITIAL_BBOX: {len(cooling)} cooling")
 
-    print("Loading safety data...")
-    crime_points = [c for c in load_safety_crime()
-                    if _in_bbox_latlon(c[0], c[1])]
-    print(f"  Inside INITIAL_BBOX: {len(crime_points)} crime points")
-    violent_crime = [c for c in load_violent_crime()
-                     if _in_bbox_latlon(c["lat"], c["lon"])]
-    print(f"  Inside INITIAL_BBOX: {len(violent_crime)} violent crime incidents")
-
     # ----- Building-coverage mask -----
     # Areas inside INITIAL_BBOX that have no building data are masked
     # out visually AND filtered from every point-based layer. The user
-    # should see no crime, ER, venue, cooling, or streetlight info on
+    # should see no venue, cooling, or streetlight info on
     # ground we cannot verify. Trees stay because they are geographic
     # features, not user-activity data.
     print("Building coverage mask:")
@@ -1246,40 +1233,26 @@ def build_time_slider_map(target_time, scale_pct):
         _c = _cell_of(lat, lon)
         return _c is not None and _c not in edge_empty
 
-    _before = (len(coords), len(osm_pois), len(medical), len(cooling),
-               len(crime_points), len(violent_crime))
+    _before = (len(coords), len(osm_pois), len(cooling))
     coords = [c for c in coords if _in_cov(c[0], c[1])]
     osm_pois = [p for p in osm_pois if _in_cov(p["lat"], p["lon"])]
-    medical = [m_ for m_ in medical if _in_cov(m_["lat"], m_["lon"])]
     cooling = [c for c in cooling if _in_cov(c["lat"], c["lon"])]
-    crime_points = [c for c in crime_points if _in_cov(c[0], c[1])]
-    violent_crime = [c for c in violent_crime if _in_cov(c["lat"], c["lon"])]
     print(f"  After mask filter:")
     print(f"    streetlights {_before[0]} -> {len(coords)}")
     print(f"    POIs {_before[1]} -> {len(osm_pois)}")
-    print(f"    medical {_before[2]} -> {len(medical)}")
-    print(f"    cooling {_before[3]} -> {len(cooling)}")
-    print(f"    crime points {_before[4]} -> {len(crime_points)}")
-    print(f"    violent crime {_before[5]} -> {len(violent_crime)}")
+    print(f"    cooling {_before[2]} -> {len(cooling)}")
 
     # Coord precision trim (~1 m) for everything that gets embedded.
     # No feature is dropped — only the coordinate string is shorter.
     coords = [[round(lat, 5), round(lon, 5)] for lat, lon in coords]
-    crime_points = [[round(lat, 5), round(lon, 5)] for lat, lon in crime_points]
     for p in osm_pois:
-        p["lat"] = round(p["lat"], 5)
-        p["lon"] = round(p["lon"], 5)
-    for p in medical:
         p["lat"] = round(p["lat"], 5)
         p["lon"] = round(p["lon"], 5)
     for p in cooling:
         p["lat"] = round(p["lat"], 5)
         p["lon"] = round(p["lon"], 5)
-    for v in violent_crime:
-        v["lat"] = round(v["lat"], 5)
-        v["lon"] = round(v["lon"], 5)
-
     m = _create_base_map("CartoDB positron", lock_zoom=True)
+    m.get_root().header.add_child(folium.Element("<title>LightMap</title>"))
     _add_building_layer(m, building_data)
 
     # Dark Matter tiles overlay, hidden by default. JS toggles on at night.
@@ -1317,58 +1290,43 @@ def build_time_slider_map(target_time, scale_pct):
         ).add_to(streetlight_group)
     streetlight_group.add_to(m)
 
-    # Safety context: nighttime crime heatmap + recent crash pins.
-    # Historic aggregates covering the last two years. Visible only
-    # when nightMix > 0.5 (same gate as OSM venue markers) so they do
-    # not clutter the day shadow view.
-    crime_group = folium.FeatureGroup(
-        name="Crime (2yr, night hrs)", show=False, control=False,
-    )
-    if crime_points:
-        # Tight radius + blur so each incident reads as a discrete
-        # spot. The earlier 14 / 22 combination flooded the streets
-        # with overlapping red; 6 / 8 keeps the hotspots tight and
-        # lets street geometry show through. min_opacity prevents a
-        # pale-red wash from painting low-density areas.
-        HeatMap(
-            crime_points, radius=6, blur=8, max_zoom=14,
-            min_opacity=0.25,
-            gradient={
-                0.35: "#450a0a", 0.6: "#991b1b",
-                0.85: "#dc2626", 1.0: "#fca5a5",
-            },
-        ).add_to(crime_group)
-    crime_group.add_to(m)
-
-    # Reuse the crash_group variable + JS name because the slider's
-    # day→night toggle already wires that identifier. The layer now
-    # holds violent-crime markers instead of traffic crashes; the name
-    # in the UI control is the only thing the user sees.
-    crash_group = folium.FeatureGroup(
-        name="Violent crime (2yr)", show=False, control=False,
-    )
-    for c in violent_crime:
-        folium.Marker(
-            location=[c["lat"], c["lon"]],
-            icon=folium.DivIcon(
-                icon_size=(10, 10),
-                icon_anchor=(5, 5),
-                html=(
-                    '<div style="width:6px;height:6px;'
-                    'transform:rotate(45deg);'
-                    'background:#dc2626;'
-                    'box-shadow:0 0 3px rgba(0,0,0,0.7);"></div>'
-                ),
-            ),
-        ).add_to(crash_group)
-    crash_group.add_to(m)
-
     _add_ui_plugins(m, theme="light")
     legend = _make_shadow_cmap()
     legend.add_to(m)
 
     slider_css = """
 <style>
+  .leaflet-container.lm-twilight .leaflet-tile-pane {
+    filter: brightness(0.86) saturate(0.82) contrast(0.96);
+    transition: filter 0.16s ease;
+  }
+  .leaflet-container.lm-twilight::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 450;
+    pointer-events: none;
+    background-color: rgba(49, 46, 129, 0.12);
+    background-image:
+      radial-gradient(
+        ellipse at 50% 100%,
+        rgba(251, 146, 60, 0.13),
+        rgba(244, 114, 182, 0.07) 28%,
+        transparent 58%
+      ),
+      radial-gradient(
+        ellipse at 50% 8%,
+        rgba(99, 102, 241, 0.15),
+        transparent 44%
+      ),
+      linear-gradient(
+        180deg,
+        rgba(15, 23, 42, 0.13),
+        rgba(79, 70, 229, 0.07) 54%,
+        rgba(244, 114, 182, 0.05) 78%,
+        rgba(251, 146, 60, 0.045)
+      );
+  }
   #lm-slider-host {
     position: fixed;
     bottom: 28px;
@@ -1387,8 +1345,6 @@ def build_time_slider_map(target_time, scale_pct):
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     user-select: none;
-    transition: background 0.4s ease, color 0.4s ease,
-                box-shadow 0.4s ease;
   }
   #lm-row {
     display: flex;
@@ -1401,13 +1357,29 @@ def build_time_slider_map(target_time, scale_pct):
     display: flex;
     align-items: center;
     gap: 10px;
-    min-width: 110px;
+    min-width: 210px;
   }
   #lm-mode-icon {
     font-size: 20px;
     line-height: 1;
-    color: #a78bfa;
-    transition: color 0.4s ease;
+    color: #eab308;
+    text-shadow: 0 0 8px rgba(234, 179, 8, 0.24);
+  }
+  #lm-mode-icon[data-phase="dawn"] {
+    color: #6366f1;
+    text-shadow: 0 0 9px rgba(99, 102, 241, 0.3);
+  }
+  #lm-mode-icon[data-phase="day"] {
+    color: #eab308;
+    text-shadow: 0 0 8px rgba(234, 179, 8, 0.24);
+  }
+  #lm-mode-icon[data-phase="dusk"] {
+    color: #a855f7;
+    text-shadow: 0 0 9px rgba(168, 85, 247, 0.28);
+  }
+  #lm-mode-icon[data-phase="night"] {
+    color: #cbd5e1;
+    text-shadow: 0 0 8px rgba(148, 163, 184, 0.24);
   }
   #lm-time {
     font-size: 28px;
@@ -1416,7 +1388,42 @@ def build_time_slider_map(target_time, scale_pct):
     color: #1e293b;
     font-variant-numeric: tabular-nums;
     line-height: 1;
-    transition: color 0.4s ease;
+  }
+  #lm-phase {
+    align-items: center;
+    border: 1px solid rgba(148, 163, 184, 0.6);
+    border-radius: 999px;
+    display: inline-flex;
+    font-size: 12px;
+    font-weight: 800;
+    height: 24px;
+    justify-content: center;
+    letter-spacing: 0.04em;
+    line-height: 1;
+    min-width: 76px;
+    padding: 0 10px;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  #lm-phase[data-phase="dawn"] {
+    background: #e0e7ff;
+    border-color: #c7d2fe;
+    color: #3730a3;
+  }
+  #lm-phase[data-phase="day"] {
+    background: #fef3c7;
+    border-color: #fde68a;
+    color: #854d0e;
+  }
+  #lm-phase[data-phase="dusk"] {
+    background: #ede9fe;
+    border-color: #ddd6fe;
+    color: #5b21b6;
+  }
+  #lm-phase[data-phase="night"] {
+    background: #1e293b;
+    border-color: #475569;
+    color: #cbd5e1;
   }
   #lm-date {
     background: transparent;
@@ -1429,27 +1436,11 @@ def build_time_slider_map(target_time, scale_pct):
     cursor: pointer;
     outline: none;
     font-variant-numeric: tabular-nums;
-    transition: border-color 0.2s, color 0.4s ease;
+    transition: border-color 0.2s;
   }
   #lm-date:hover, #lm-date:focus { border-color: #94a3b8; }
   #lm-date::-webkit-calendar-picker-indicator {
     cursor: pointer; opacity: 0.55;
-  }
-  #lm-incidents-wrap {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 13px;
-    color: #64748b;
-    white-space: nowrap;
-    cursor: pointer;
-    user-select: none;
-  }
-  #lm-incidents {
-    width: 13px;
-    height: 13px;
-    margin: 0;
-    accent-color: #64748b;
   }
   #lm-play {
     background: #f1f5f9;
@@ -1465,8 +1456,7 @@ def build_time_slider_map(target_time, scale_pct):
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    transition: background 0.2s, color 0.4s ease,
-                border-color 0.2s;
+    transition: background 0.2s, border-color 0.2s;
   }
   #lm-play:hover { background: #e2e8f0; border-color: #94a3b8; }
 
@@ -1482,7 +1472,7 @@ def build_time_slider_map(target_time, scale_pct):
     top: 34px;
     height: 24px;
     display: grid;
-    grid-template-columns: repeat(24, minmax(0, 1fr));
+    grid-template-columns: repeat(25, minmax(0, 1fr));
     gap: 3px;
     padding: 3px;
     border: 2px solid rgba(148, 163, 184, 0.62);
@@ -1516,6 +1506,11 @@ def build_time_slider_map(target_time, scale_pct):
     background: #facc15;
     opacity: 1;
     box-shadow: 0 0 9px rgba(250, 204, 21, 0.58);
+  }
+  .lm-point-window-segment.is-active-night {
+    background: #fb923c;
+    opacity: 1;
+    box-shadow: 0 0 9px rgba(251, 146, 60, 0.5);
   }
   .lm-point-window-segment.is-open {
     background: #38bdf8;
@@ -1566,6 +1561,10 @@ def build_time_slider_map(target_time, scale_pct):
     background: #facc15;
     box-shadow: 0 0 8px rgba(250, 204, 21, 0.58);
   }
+  .lm-point-window-dot.is-active-night {
+    background: #fb923c;
+    box-shadow: 0 0 8px rgba(251, 146, 60, 0.5);
+  }
   .lm-point-window-dot.is-open {
     background: #38bdf8;
     box-shadow: 0 0 8px rgba(56, 189, 248, 0.48);
@@ -1588,9 +1587,10 @@ def build_time_slider_map(target_time, scale_pct):
     transform: translateX(-50%);
     pointer-events: none;
     z-index: 1;
-    transition: left 0.4s ease, background 0.4s ease;
+    transition: left 0.4s ease;
   }
   #lm-sunrise-marker { background: #fbbf24; }
+  #lm-next-sunrise-marker { background: #fbbf24; }
   #lm-sunset-marker { background: #f97316; }
   .lm-sun-label {
     position: absolute;
@@ -1602,7 +1602,7 @@ def build_time_slider_map(target_time, scale_pct):
     pointer-events: none;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
-    transition: left 0.4s ease, color 0.4s ease;
+    transition: left 0.4s ease;
   }
   #lm-sunrise-label::before { content: "\u25B2 "; color: #fbbf24; }
   #lm-sunset-label::before { content: "\u25BC "; color: #f97316; }
@@ -1619,7 +1619,6 @@ def build_time_slider_map(target_time, scale_pct):
     margin: 0;
     position: relative;
     z-index: 2;
-    transition: background 0.4s ease;
   }
   #lm-range::-webkit-slider-thumb {
     -webkit-appearance: none;
@@ -1631,7 +1630,7 @@ def build_time_slider_map(target_time, scale_pct):
     border: 2px solid #a78bfa;
     cursor: pointer;
     box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.2);
-    transition: box-shadow 0.15s, border-color 0.3s ease;
+    transition: box-shadow 0.15s;
   }
   #lm-range::-webkit-slider-thumb:hover {
     box-shadow: 0 0 0 6px rgba(167, 139, 250, 0.3);
@@ -1644,7 +1643,7 @@ def build_time_slider_map(target_time, scale_pct):
     border: 2px solid #a78bfa;
     cursor: pointer;
     box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.2);
-    transition: box-shadow 0.15s, border-color 0.3s ease;
+    transition: box-shadow 0.15s;
   }
 
   /* NIGHT theme overrides */
@@ -1654,7 +1653,16 @@ def build_time_slider_map(target_time, scale_pct):
     box-shadow: 0 10px 32px rgba(0, 0, 0, 0.4);
   }
   #lm-slider-host.night #lm-time { color: #e2e8f0; }
-  #lm-slider-host.night #lm-mode-icon { color: #fbbf24; }
+  #lm-slider-host.night #lm-phase[data-phase="dusk"] {
+    background: #2e2242;
+    border-color: #7c3aed;
+    color: #ddd6fe;
+  }
+  #lm-slider-host.night #lm-phase[data-phase="dawn"] {
+    background: #1e2a4a;
+    border-color: #6366f1;
+    color: #c7d2fe;
+  }
   #lm-slider-host.night #lm-date {
     border-color: #334155; color: #e2e8f0;
   }
@@ -1665,8 +1673,6 @@ def build_time_slider_map(target_time, scale_pct):
   #lm-slider-host.night #lm-date::-webkit-calendar-picker-indicator {
     filter: invert(0.8);
   }
-  #lm-slider-host.night #lm-incidents-wrap { color: #94a3b8; }
-  #lm-slider-host.night #lm-incidents { accent-color: #fbbf24; }
   #lm-slider-host.night #lm-play {
     background: #1e293b; color: #e2e8f0; border-color: #334155;
   }
@@ -1696,6 +1702,10 @@ def build_time_slider_map(target_time, scale_pct):
     background: #facc15;
     box-shadow: 0 0 10px rgba(250, 204, 21, 0.62);
   }
+  #lm-slider-host.night .lm-point-window-segment.is-active-night {
+    background: #fb923c;
+    box-shadow: 0 0 10px rgba(251, 146, 60, 0.54);
+  }
   #lm-slider-host.night .lm-point-window-segment.is-open {
     background: #38bdf8;
     box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
@@ -1723,6 +1733,105 @@ def build_time_slider_map(target_time, scale_pct):
     box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.2);
   }
   #lm-slider-host.night .lm-sun-label { color: #64748b; }
+  #lm-slider-host.twilight {
+    background:
+      linear-gradient(
+        180deg,
+        rgba(213, 221, 240, 0.97),
+        rgba(224, 215, 234, 0.97)
+      );
+    color: #1f2937;
+    box-shadow:
+      0 10px 34px rgba(49, 46, 129, 0.24),
+      0 0 28px rgba(244, 114, 182, 0.12),
+      inset 0 0 0 1px rgba(79, 70, 229, 0.18);
+  }
+  #lm-slider-host.twilight #lm-range {
+    background: linear-gradient(90deg, #6f7ca4, #9b8cc5, #c58c8f);
+  }
+  #lm-slider-host.twilight #lm-date,
+  #lm-slider-host.twilight #lm-play {
+    background: rgba(241, 245, 249, 0.88);
+    border-color: #a5aecb;
+  }
+  #lm-slider-host.twilight #lm-time {
+    color: #1f2937;
+  }
+  #lm-slider-host.twilight .lm-sun-label {
+    color: #566079;
+  }
+  #lm-slider-host.twilight #lm-range::-webkit-slider-thumb {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2);
+  }
+  #lm-slider-host.twilight #lm-range::-moz-range-thumb {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2);
+  }
+  #lm-slider-host[data-phase="dawn"] #lm-range::-webkit-slider-thumb {
+    background: #c7d2fe;
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2),
+                0 0 12px rgba(99, 102, 241, 0.28);
+  }
+  #lm-slider-host[data-phase="dawn"] #lm-range::-webkit-slider-thumb:hover {
+    box-shadow: 0 0 0 6px rgba(99, 102, 241, 0.28),
+                0 0 14px rgba(99, 102, 241, 0.32);
+  }
+  #lm-slider-host[data-phase="dawn"] #lm-range::-moz-range-thumb {
+    background: #c7d2fe;
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2),
+                0 0 12px rgba(99, 102, 241, 0.28);
+  }
+  #lm-slider-host[data-phase="day"] #lm-range::-webkit-slider-thumb {
+    background: #fef3c7;
+    border-color: #eab308;
+    box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.2),
+                0 0 12px rgba(234, 179, 8, 0.28);
+  }
+  #lm-slider-host[data-phase="day"] #lm-range::-webkit-slider-thumb:hover {
+    box-shadow: 0 0 0 6px rgba(234, 179, 8, 0.28),
+                0 0 14px rgba(234, 179, 8, 0.32);
+  }
+  #lm-slider-host[data-phase="day"] #lm-range::-moz-range-thumb {
+    background: #fef3c7;
+    border-color: #eab308;
+    box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.2),
+                0 0 12px rgba(234, 179, 8, 0.28);
+  }
+  #lm-slider-host[data-phase="dusk"] #lm-range::-webkit-slider-thumb {
+    background: #e9d5ff;
+    border-color: #a855f7;
+    box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.2),
+                0 0 12px rgba(168, 85, 247, 0.28);
+  }
+  #lm-slider-host[data-phase="dusk"] #lm-range::-webkit-slider-thumb:hover {
+    box-shadow: 0 0 0 6px rgba(168, 85, 247, 0.28),
+                0 0 14px rgba(168, 85, 247, 0.32);
+  }
+  #lm-slider-host[data-phase="dusk"] #lm-range::-moz-range-thumb {
+    background: #e9d5ff;
+    border-color: #a855f7;
+    box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.2),
+                0 0 12px rgba(168, 85, 247, 0.28);
+  }
+  #lm-slider-host[data-phase="night"] #lm-range::-webkit-slider-thumb {
+    background: #cbd5e1;
+    border-color: #64748b;
+    box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.22),
+                0 0 12px rgba(203, 213, 225, 0.24);
+  }
+  #lm-slider-host[data-phase="night"] #lm-range::-webkit-slider-thumb:hover {
+    box-shadow: 0 0 0 6px rgba(148, 163, 184, 0.3),
+                0 0 14px rgba(203, 213, 225, 0.28);
+  }
+  #lm-slider-host[data-phase="night"] #lm-range::-moz-range-thumb {
+    background: #cbd5e1;
+    border-color: #64748b;
+    box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.22),
+                0 0 12px rgba(203, 213, 225, 0.24);
+  }
 
   #lm-agent-host {
     position: fixed;
@@ -1780,38 +1889,77 @@ def build_time_slider_map(target_time, scale_pct):
   #lm-agent-actions {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 10px;
-    margin-bottom: 8px;
+    gap: 8px;
   }
   .lm-agent-section {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
   }
   .lm-agent-section-title {
+    grid-column: 1 / -1;
     color: #64748b;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 800;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
   }
   .lm-agent-chip {
     border: 1px solid #cbd5e1;
-    border-radius: 7px;
+    border-radius: 8px;
     background: #f8fafc;
     color: #334155;
     cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
     font-family: inherit;
-    font-size: 14px;
+    font-size: 12px;
+    font-weight: 800;
     line-height: 1.25;
-    padding: 7px 9px;
-    padding-right: 30px;
+    min-height: 58px;
+    padding: 8px 6px;
     position: relative;
-    text-align: left;
+    text-align: center;
     transition: background 0.15s ease, border-color 0.15s ease,
-                color 0.15s ease;
+                color 0.15s ease, transform 0.15s ease;
   }
-  .lm-agent-chip:hover { background: #f1f5f9; border-color: #94a3b8; }
+  .lm-agent-chip::before {
+    content: "";
+    width: 19px;
+    height: 19px;
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.75),
+                0 1px 5px rgba(15, 23, 42, 0.2);
+  }
+  .lm-agent-chip[data-action="point-shade"]::before {
+    background: #2563eb;
+    box-shadow: inset 8px 0 0 rgba(15, 23, 42, 0.26),
+                inset 0 0 0 2px rgba(255, 255, 255, 0.75),
+                0 1px 5px rgba(37, 99, 235, 0.35);
+  }
+  .lm-agent-chip[data-action="point-sun"]::before {
+    background: #facc15;
+    box-shadow: 0 0 10px rgba(250, 204, 21, 0.68),
+                inset 0 0 0 2px rgba(255, 255, 255, 0.8);
+  }
+  .lm-agent-chip[data-action="point-active"]::before {
+    background: #fb923c;
+    box-shadow: 0 0 12px rgba(251, 146, 60, 0.58),
+                inset 0 0 0 2px rgba(255, 255, 255, 0.82);
+  }
+  .lm-agent-chip[data-action="point-zero"]::before {
+    background: #334155;
+    box-shadow: inset 0 0 0 2px rgba(148, 163, 184, 0.95),
+                0 1px 5px rgba(15, 23, 42, 0.22);
+  }
+  .lm-agent-chip:hover {
+    background: #f1f5f9;
+    border-color: #94a3b8;
+    transform: translateY(-1px);
+  }
   .lm-agent-chip.is-active {
     background: #eff6ff;
     border-color: #2563eb;
@@ -1821,10 +1969,9 @@ def build_time_slider_map(target_time, scale_pct):
     content: "";
     position: absolute;
     right: 9px;
-    top: 50%;
+    top: 9px;
     width: 12px;
     height: 12px;
-    margin-top: -7px;
     border: 2px solid #bfdbfe;
     border-top-color: #2563eb;
     border-radius: 50%;
@@ -1841,6 +1988,9 @@ def build_time_slider_map(target_time, scale_pct):
     line-height: 1.45;
     white-space: pre-wrap;
   }
+  #lm-agent-answer.is-empty {
+    display: none;
+  }
   #lm-slider-host.night ~ #lm-agent-host {
     background: rgba(15, 23, 42, 0.94);
     color: #e2e8f0;
@@ -1849,8 +1999,8 @@ def build_time_slider_map(target_time, scale_pct):
   #lm-slider-host.night ~ #lm-agent-host.is-busy {
     box-shadow:
       0 12px 34px rgba(0, 0, 0, 0.46),
-      0 0 0 1px rgba(234, 179, 8, 0.32),
-      0 0 0 4px rgba(234, 179, 8, 0.12);
+      0 0 0 1px rgba(251, 146, 60, 0.28),
+      0 0 0 4px rgba(251, 146, 60, 0.1);
   }
   #lm-slider-host.night ~ #lm-agent-host #lm-agent-status,
   #lm-slider-host.night ~ #lm-agent-host #lm-agent-answer {
@@ -1879,12 +2029,11 @@ def build_time_slider_map(target_time, scale_pct):
     border-color: #eab308;
     color: #fde68a;
   }
-  #lm-slider-host.night ~ #lm-agent-host .lm-agent-chip.is-active[data-action="point-light"],
-  #lm-slider-host.night ~ #lm-agent-host .lm-agent-chip.is-active[data-action="point-open"],
-  #lm-slider-host.night ~ #lm-agent-host .lm-agent-chip.is-active[data-action="point-lit-open"] {
-    background: #2f2a16;
-    border-color: #eab308;
-    color: #fde68a;
+  #lm-slider-host.night ~ #lm-agent-host .lm-agent-chip.is-active[data-action="point-active"],
+  #lm-slider-host.night ~ #lm-agent-host .lm-agent-chip.is-active[data-action="point-zero"] {
+    background: #3b1f0b;
+    border-color: #fb923c;
+    color: #fed7aa;
   }
   #lm-slider-host.night ~ #lm-agent-host #lm-agent-answer {
     border-top-color: #334155;
@@ -1931,17 +2080,14 @@ def build_time_slider_map(target_time, scale_pct):
 """
 
     slider_html = """
-<div id="lm-slider-host">
+<div id="lm-slider-host" data-phase="day">
   <div id="lm-row">
     <div id="lm-time-wrap">
-      <span id="lm-mode-icon">\u2600</span>
+      <span id="lm-mode-icon" data-phase="day">\u2600</span>
       <span id="lm-time">--:--</span>
+      <span id="lm-phase" data-phase="day">Day</span>
     </div>
     <input type="date" id="lm-date" value="__INITIAL_DATE__">
-    <label id="lm-incidents-wrap" title="Show historic incident reference layer">
-      <input type="checkbox" id="lm-incidents">
-      <span>Incidents</span>
-    </label>
     <button id="lm-play" aria-label="Play or pause the time slider">
       <span id="lm-play-icon">\u25B6</span>
     </button>
@@ -1949,43 +2095,41 @@ def build_time_slider_map(target_time, scale_pct):
   <div id="lm-range-wrap">
     <div class="lm-sun-label" id="lm-sunrise-label">--:--</div>
     <div class="lm-sun-label" id="lm-sunset-label">--:--</div>
+    <div class="lm-sun-label" id="lm-next-sunrise-label">--:-- +1</div>
     <div class="lm-sun-marker" id="lm-sunrise-marker"></div>
     <div class="lm-sun-marker" id="lm-sunset-marker"></div>
+    <div class="lm-sun-marker" id="lm-next-sunrise-marker"></div>
     <div id="lm-point-window-track" aria-hidden="true"></div>
     <div id="lm-point-window-summary" aria-live="polite"></div>
-    <input type="range" id="lm-range" min="0" max="23" step="1" value="14">
+    <input type="range" id="lm-range" min="4" max="28" step="1" value="14">
   </div>
 </div>
 <div id="lm-agent-host" aria-live="polite">
   <div id="lm-agent-title">
-    <span>LightMap Agent</span>
+    <span>LightTime Agent</span>
     <span id="lm-agent-status">local agent</span>
   </div>
   <div id="lm-agent-actions">
     <div class="lm-agent-section">
       <div class="lm-agent-section-title">Daytime</div>
       <button class="lm-agent-chip" data-action="point-shade" type="button">
-        When is this spot shaded?
+        Shadow Time
       </button>
       <button class="lm-agent-chip" data-action="point-sun" type="button">
-        When is this spot sunny?
+        Sunny Time
       </button>
     </div>
     <div class="lm-agent-section">
       <div class="lm-agent-section-title">Nighttime</div>
-      <button class="lm-agent-chip" data-action="point-light" type="button">
-        When is this area lit?
+      <button class="lm-agent-chip" data-action="point-active" type="button">
+        Active Time
       </button>
-      <button class="lm-agent-chip" data-action="point-open" type="button">
-        When are nearby places open?
-      </button>
-      <button class="lm-agent-chip" data-action="point-lit-open" type="button">
-        When is light and activity nearby?
+      <button class="lm-agent-chip" data-action="point-zero" type="button">
+        Inactive Time
       </button>
     </div>
   </div>
-  <div id="lm-agent-answer" aria-live="polite">
-    Choose an action to highlight a useful area.
+  <div id="lm-agent-answer" class="is-empty" aria-live="polite">
   </div>
 </div>
 """
@@ -2007,7 +2151,6 @@ def build_time_slider_map(target_time, scale_pct):
   var LIGHT_POINTS = __LIGHT_POINTS__;
   var TREES_PNG_URL = "__TREES_PNG_URL__";
   var TREES_BBOX = __TREES_BBOX__;
-  var MEDICAL = __MEDICAL__;
   var COOLING = __COOLING__;
   var HEAT_TMAX_F = __HEAT_TMAX_F__;
   var HEAT_APPARENT_F = __HEAT_APPARENT_F__;
@@ -2019,28 +2162,31 @@ def build_time_slider_map(target_time, scale_pct):
   var M_PER_DEG_LAT = 111320;
   var M_PER_DEG_LON = 111320 * Math.cos(LAT_CENTER * Math.PI / 180);
   var MAX_SHADOW_LENGTH = 500;
-  // Dawn/dusk transition.
-  //   altitude <= TWILIGHT_START : full dark (night theme locked in)
-  //   TWILIGHT_START .. DAY_THRESHOLD : dark basemap fades out linearly
-  //   altitude >= DAY_THRESHOLD : full day. Shadows appear from here.
-  // Below DAY_THRESHOLD every building would project 200 m+ shadows
-  // (cap is 500 m) and they merge into a city-wide "shadow wall".
-  // Pinning the shadow gate at 15 deg altitude keeps the evening
-  // transition smooth — around 18:00 in Boston summer the sun drops
-  // below 15 deg, shadows switch off, and the scene gradually darkens
-  // into night. Sunrise/sunset slider markers still track the true
-  // altitude-0 moments.
-  var TWILIGHT_START = 0;
+  // Building shadows use a higher threshold than the visual day/night
+  // theme because low sun projects 200 m+ shadows that merge into a
+  // city-wide wall. The theme itself follows SunCalc sunrise/sunset.
   var DAY_THRESHOLD = 15;
   var POINT_CHECK_RADIUS_M = 17;
   var POINT_SCAN_RADIUS_M = 20;
   var POINT_SHADE_MIN_SAMPLES = 2;
   var POINT_FULL_SHADE_MIN_SAMPLES = 11;
-  var NIGHT_LIGHT_RADIUS_M = 120;
-  var NIGHT_VENUE_RADIUS_M = 180;
+  var TIMELINE_START_SLOT = 4;
+  var TIMELINE_END_SLOT = 28;
+  var NIGHT_ACTIVITY_RADIUS_M = 100;
+  var ACTIVITY_MAX_SCORE = 50;
+  var NIGHT_ACTIVE_SCORE = 45;
+  var NIGHT_QUIET_SCORE = 25;
+  var STREETLIGHT_GLOW_BASE_ZOOM = 16;
+  var STREETLIGHT_GLOW_BASE_RADIUS = 5;
+  var STREETLIGHT_GLOW_BASE_BLUR = 8;
+  var STREETLIGHT_GLOW_MAX_RADIUS = 80;
+  var STREETLIGHT_GLOW_MAX_BLUR = 128;
 
   function pad(n) { return n < 10 ? "0" + n : "" + n; }
   function d2r(d) { return d * Math.PI / 180; }
+  function slotHour(slot) {
+    return ((slot % 24) + 24) % 24;
+  }
 
   // US DST rough check (2nd Sun of March to 1st Sun of November).
   // Used so Boston-local wall-clock hour on the slider maps to the
@@ -2103,20 +2249,20 @@ def build_time_slider_map(target_time, scale_pct):
     var map = __MAP_NAME__;
     var dark = __DARK_NAME__;
     var lights = __STREET_NAME__;
-    var crime = __CRIME_NAME__;
-    var crash = __CRASH_NAME__;
     var host = document.getElementById("lm-slider-host");
     var rangeEl = document.getElementById("lm-range");
     var dateEl = document.getElementById("lm-date");
     var timeEl = document.getElementById("lm-time");
     var iconEl = document.getElementById("lm-mode-icon");
-    var incidentEl = document.getElementById("lm-incidents");
+    var phaseEl = document.getElementById("lm-phase");
     var playEl = document.getElementById("lm-play");
     var playIconEl = document.getElementById("lm-play-icon");
     var srMarker = document.getElementById("lm-sunrise-marker");
     var ssMarker = document.getElementById("lm-sunset-marker");
+    var nsMarker = document.getElementById("lm-next-sunrise-marker");
     var srLabel = document.getElementById("lm-sunrise-label");
     var ssLabel = document.getElementById("lm-sunset-label");
+    var nsLabel = document.getElementById("lm-next-sunrise-label");
     var pointWindowEl = document.getElementById("lm-point-window-track");
     var pointWindowSummaryEl = document.getElementById("lm-point-window-summary");
     var agentHostEl = document.getElementById("lm-agent-host");
@@ -2127,7 +2273,7 @@ def build_time_slider_map(target_time, scale_pct):
     var state = {
       dateStr: INITIAL_DATE, slot: parseInt(rangeEl.value, 10),
       playing: false, playTimer: null, shadowLayer: null,
-      hadShadows: false, incidentsOn: false,
+      hadShadows: false,
       lastSun: null, nightMix: 0, heatOn: false,
       userLocation: null, userMarker: null,
       currentShadows: [], openVenuePoints: [],
@@ -2136,6 +2282,7 @@ def build_time_slider_map(target_time, scale_pct):
       pointWindowKind: null, pointWindowAnalysis: null,
       pointWindowBest: null
     };
+    var streetlightHeatLayer = null;
 
     function parseDateStr(s) {
       var parts = s.split("-").map(Number);
@@ -2158,16 +2305,41 @@ def build_time_slider_map(target_time, scale_pct):
         }
         var hour = parseInt(values.hour || "0", 10);
         if (hour === 24) hour = 0;
+        var dateStr = values.year + "-" + values.month + "-" + values.day;
+        var slot = hour;
+        if (hour < TIMELINE_START_SLOT) {
+          var serviceDate = new Date(Date.UTC(
+            parseInt(values.year, 10),
+            parseInt(values.month, 10) - 1,
+            parseInt(values.day, 10) - 1
+          ));
+          dateStr = serviceDate.getUTCFullYear() + "-"
+            + pad(serviceDate.getUTCMonth() + 1) + "-"
+            + pad(serviceDate.getUTCDate());
+          slot = hour + 24;
+        }
         return {
-          dateStr: values.year + "-" + values.month + "-" + values.day,
-          slot: Math.max(0, Math.min(23, hour))
+          dateStr: dateStr,
+          slot: Math.max(TIMELINE_START_SLOT, Math.min(TIMELINE_END_SLOT, slot))
         };
       } catch (e) {
         var now = new Date();
+        var fallbackDate = new Date(
+          now.getFullYear(), now.getMonth(), now.getDate()
+        );
+        var fallbackSlot = now.getHours();
+        if (fallbackSlot < TIMELINE_START_SLOT) {
+          fallbackDate.setDate(fallbackDate.getDate() - 1);
+          fallbackSlot += 24;
+        }
         return {
-          dateStr: now.getFullYear() + "-" + pad(now.getMonth() + 1)
-            + "-" + pad(now.getDate()),
-          slot: now.getHours()
+          dateStr: fallbackDate.getFullYear() + "-"
+            + pad(fallbackDate.getMonth() + 1)
+            + "-" + pad(fallbackDate.getDate()),
+          slot: Math.max(
+            TIMELINE_START_SLOT,
+            Math.min(TIMELINE_END_SLOT, fallbackSlot)
+          )
         };
       }
     }
@@ -2192,15 +2364,88 @@ def build_time_slider_map(target_time, scale_pct):
       return {
         alt: pos.altitude * 180 / Math.PI,
         az: (pos.azimuth * 180 / Math.PI + 180 + 360) % 360,
-        hour: hour, min: min
+        hour: slotHour(slot), min: min,
+        slot: slot
       };
     }
 
-    function nightMixForAltitude(altDeg) {
-      if (altDeg <= TWILIGHT_START) return 1;
-      if (altDeg >= DAY_THRESHOLD) return 0;
-      return 1 - (altDeg - TWILIGHT_START) /
-        (DAY_THRESHOLD - TWILIGHT_START);
+    function localHourFraction(dt, utcOffset) {
+      var utcH = dt.getUTCHours() + (dt.getUTCMinutes() / 60);
+      var localH = (utcH + utcOffset + 24) % 24;
+      var hh = Math.floor(localH);
+      var mm = Math.round((localH - hh) * 60);
+      if (mm === 60) { hh = (hh + 1) % 24; mm = 0; }
+      return hh + mm / 60;
+    }
+
+    function sunWindowForDate(dateStr) {
+      var p = parseDateStr(dateStr);
+      var noon = bostonDate(p.y, p.m, p.d, 12, 0);
+      var times = SunCalc.getTimes(noon, LAT_CENTER, LON_CENTER);
+      if (!times.sunrise || !times.sunset ||
+          isNaN(times.sunrise.getTime()) ||
+          isNaN(times.sunset.getTime())) {
+        return null;
+      }
+      var off = bostonUtcOffset(p.y, p.m, p.d);
+      return {
+        sunrise: localHourFraction(times.sunrise, off),
+        sunset: localHourFraction(times.sunset, off)
+      };
+    }
+
+    function addDaysToDateStr(dateStr, days) {
+      var p = parseDateStr(dateStr);
+      var d = new Date(Date.UTC(p.y, p.m, p.d + days));
+      return d.getUTCFullYear() + "-" + pad(d.getUTCMonth() + 1)
+        + "-" + pad(d.getUTCDate());
+    }
+
+    function findStreetlightHeatLayer() {
+      if (streetlightHeatLayer) return streetlightHeatLayer;
+      if (!lights || !lights.eachLayer) return null;
+      lights.eachLayer(function(layer) {
+        if (!streetlightHeatLayer && layer && layer._heat) {
+          streetlightHeatLayer = layer;
+        }
+      });
+      return streetlightHeatLayer;
+    }
+
+    function streetlightGlowForZoom(zoom) {
+      var scale = Math.pow(2, Math.max(0, zoom - STREETLIGHT_GLOW_BASE_ZOOM));
+      return {
+        radius: Math.round(Math.min(
+          STREETLIGHT_GLOW_MAX_RADIUS,
+          STREETLIGHT_GLOW_BASE_RADIUS * scale
+        )),
+        blur: Math.round(Math.min(
+          STREETLIGHT_GLOW_MAX_BLUR,
+          STREETLIGHT_GLOW_BASE_BLUR * scale
+        ))
+      };
+    }
+
+    function applyStreetlightGlowZoom() {
+      var layer = findStreetlightHeatLayer();
+      if (!layer) return;
+      var zoom = map.getZoom();
+      var glow = streetlightGlowForZoom(zoom);
+      if (layer.setOptions) {
+        layer.setOptions({ radius: glow.radius, blur: glow.blur });
+      } else {
+        layer.options.radius = glow.radius;
+        layer.options.blur = glow.blur;
+        if (layer._heat && layer._heat.radius) {
+          layer._heat.radius(glow.radius, glow.blur);
+        }
+        if (layer.redraw) layer.redraw();
+      }
+      window.__lightmapStreetlightGlow = {
+        zoom: zoom,
+        radius: glow.radius,
+        blur: glow.blur
+      };
     }
 
     function projectShadow(ring, hm, altDeg, azDeg) {
@@ -2343,15 +2588,15 @@ def build_time_slider_map(target_time, scale_pct):
       pointToLayer: function(feat, latlng) {
         // L.marker with DivIcon lands in markerPane (z-index 600),
         // above both the streetlight heatmap (overlayPane) and the
-        // shadow canvas, so the green dot stays legible at night.
+        // shadow canvas, so the yellow dot stays legible at night.
         return L.marker(latlng, {
           interactive: false,
           icon: L.divIcon({
             className: 'lm-poi',
-            iconSize: [16, 16],
-            iconAnchor: [8, 8],
+            iconSize: [20, 20],
+            iconAnchor: [10, 10],
             html: (
-              '<div style="width:11px;height:11px;border-radius:50%;'
+              '<div style="width:14px;height:14px;border-radius:50%;'
               + 'background:#facc15;border:1.5px solid #422006;'
               + 'box-shadow:0 0 7px rgba(250,204,21,0.95);"></div>'
             )
@@ -2372,16 +2617,11 @@ def build_time_slider_map(target_time, scale_pct):
     // the getState loop. Invalidated on date change (different sun).
     var poiCache = new Map();
 
-    function renderPois(altDeg) {
-      // POI visibility mirrors the slider's day/night chrome flip so
-      // the moment the slider icon turns to a sun, the yellow markers
-      // vanish. That crossover is at nightMix = 0.5, i.e. altitude
-      // (TWILIGHT_START + DAY_THRESHOLD) / 2. Keeping the markers on
-      // past that point looked like a glitch against the daytime
-      // basemap.
+    function renderPois() {
+      // POI visibility mirrors the hard day/night switch so the venue
+      // markers never sit over the daytime basemap.
       poiLayer.clearLayers();
-      var nightMix = nightMixForAltitude(altDeg);
-      if (nightMix <= 0.5) {
+      if (!isNightSlot(state.slot)) {
         state.openVenuePoints = [];
         return;
       }
@@ -2408,9 +2648,9 @@ def build_time_slider_map(target_time, scale_pct):
             }
           });
         }
-        if (poiCache.size >= 24) {
-          poiCache.delete(poiCache.keys().next().value);
-        }
+      if (poiCache.size >= TIMELINE_END_SLOT + 2) {
+        poiCache.delete(poiCache.keys().next().value);
+      }
         poiCache.set(key, feats);
       }
       poiLayer.addData({
@@ -2551,7 +2791,11 @@ def build_time_slider_map(target_time, scale_pct):
       var slots = [];
       var bestShade = null;
       var bestBright = null;
-      for (var slot = 0; slot < 24; slot++) {
+      for (
+        var slot = TIMELINE_START_SLOT;
+        slot <= TIMELINE_END_SLOT;
+        slot++
+      ) {
         var item = pointShadeAtSlot(lat, lon, slot);
         slots.push(item);
         if (item.shaded &&
@@ -2624,44 +2868,152 @@ def build_time_slider_map(target_time, scale_pct):
     }
 
     function isNightSlot(slot) {
-      var sun = sunAt(state.dateStr, slot);
-      return nightMixForAltitude(sun.alt) > 0.5;
+      var dayOffset = slot >= 24 ? 1 : 0;
+      var hour = slot >= 24 ? slot - 24 : slot;
+      var dateStr = dayOffset ? addDaysToDateStr(state.dateStr, 1)
+        : state.dateStr;
+      var sunWindow = sunWindowForDate(dateStr);
+      if (!sunWindow) {
+        return sunAt(state.dateStr, slot).alt < 0;
+      }
+      return hour < sunWindow.sunrise || hour >= sunWindow.sunset;
+    }
+
+    function phaseForSlot(slot) {
+      var hour = slotHour(slot);
+      var sun = state.lastSun || sunAt(state.dateStr, slot);
+      if (isNightSlot(slot)) {
+        return { key: "night", label: "Night" };
+      }
+      if (sun.alt < DAY_THRESHOLD && hour < 12) {
+        return { key: "dawn", label: "Dawn" };
+      }
+      if (sun.alt < DAY_THRESHOLD && hour >= 12) {
+        return { key: "dusk", label: "Dusk" };
+      }
+      return { key: "day", label: "Day" };
+    }
+
+    function activityLevel(score) {
+      if (score >= ACTIVITY_MAX_SCORE) return "high";
+      if (score >= NIGHT_ACTIVE_SCORE) return "active";
+      if (score > NIGHT_QUIET_SCORE) return "low";
+      return "quiet";
+    }
+
+    function activityScoreIntensity(score) {
+      return Math.max(
+        0,
+        Math.min(ACTIVITY_MAX_SCORE, score || 0)
+      ) / ACTIVITY_MAX_SCORE;
+    }
+
+    function activityHighlightOpacity(coverage) {
+      var intensity = Math.max(0, Math.min(1, coverage || 0));
+      return 0.06 + Math.pow(intensity, 1.45) * 0.48;
+    }
+
+    function nightActivityAt(lat, lon, slot, lightStats) {
+      var openStats = nearbyOpenVenuesAtSlot(
+        lat, lon, slot, NIGHT_ACTIVITY_RADIUS_M
+      );
+      var night = isNightSlot(slot);
+      var hasOpenPlaces = openStats.count > 0;
+      var openCountComponent = hasOpenPlaces
+        ? Math.min(ACTIVITY_MAX_SCORE, openStats.count * 10)
+        : 0;
+      var activityScore = night && hasOpenPlaces
+        ? Math.max(
+          0,
+          Math.min(
+            ACTIVITY_MAX_SCORE,
+            openCountComponent
+          )
+        )
+        : 0;
+      activityScore = Math.round(activityScore);
+      return {
+        slot: slot,
+        night: night,
+        active: night && activityScore >= NIGHT_ACTIVE_SCORE,
+        quiet: night && activityScore <= NIGHT_QUIET_SCORE,
+        zero: night && activityScore === 0,
+        openSignal: night && openStats.count > 0,
+        activityScore: activityScore,
+        level: activityLevel(activityScore),
+        lightCount: lightStats.count,
+        lightNearestM: lightStats.nearestM,
+        openCount: openStats.count,
+        places: openStats.places
+      };
+    }
+
+    function firstMatchingNightSlot(slots, prop, startSlot) {
+      if (!slots || !slots.length) return null;
+      var fallback = null;
+      for (var i = 0; i < slots.length; i++) {
+        var slot = slots[i];
+        if (!slot.night || !slot[prop]) continue;
+        if (!fallback) fallback = slot;
+        if (slot.slot >= startSlot) return slot;
+      }
+      return fallback;
     }
 
     function analyzePointNight(lat, lon, kind) {
-      var lightStats = nearbyLightStats(lat, lon, NIGHT_LIGHT_RADIUS_M);
+      var lightStats = nearbyLightStats(lat, lon, NIGHT_ACTIVITY_RADIUS_M);
       var slots = [];
       var best = null;
-      for (var slot = 0; slot < 24; slot++) {
-        var openStats = nearbyOpenVenuesAtSlot(
-          lat, lon, slot, NIGHT_VENUE_RADIUS_M
-        );
-        var night = isNightSlot(slot);
-        var lit = night && lightStats.count > 0;
-        var open = night && openStats.count > 0;
-        var combined = lit && open;
-        var active = kind === "light" ? lit
-          : kind === "open" ? open
-          : combined;
-        var score = 0;
-        if (lit) score += lightStats.score + 1;
-        if (open) score += openStats.count * 2;
-        if (combined) score += 3;
-        var item = {
-          slot: slot,
-          night: night,
-          lit: lit,
-          open: open,
-          combined: combined,
-          active: active,
-          score: score,
-          lightCount: lightStats.count,
-          openCount: openStats.count,
-          places: openStats.places
-        };
+      var bestActive = null;
+      var bestOpen = null;
+      var lowestNight = null;
+      for (
+        var slot = TIMELINE_START_SLOT;
+        slot <= TIMELINE_END_SLOT;
+        slot++
+      ) {
+        var item = nightActivityAt(lat, lon, slot, lightStats);
         slots.push(item);
-        if (active && (!best || item.score > best.score)) {
+        if (item.night &&
+            (!best || item.activityScore > best.activityScore)) {
           best = item;
+        }
+        if (item.night &&
+            (!lowestNight ||
+             item.activityScore < lowestNight.activityScore)) {
+          lowestNight = item;
+        }
+        if (item.active &&
+            (!bestActive ||
+             item.activityScore > bestActive.activityScore)) {
+          bestActive = item;
+        }
+        if (item.openSignal &&
+            (!bestOpen ||
+             item.openCount > bestOpen.openCount ||
+             (item.openCount === bestOpen.openCount &&
+              item.activityScore > bestOpen.activityScore))) {
+          bestOpen = item;
+        }
+      }
+      var quietStart = null;
+      if (bestActive || best) {
+        var anchor = bestActive || best;
+        var anchorIndex = slots.indexOf(anchor);
+        for (var step = 1; step < slots.length - anchorIndex; step++) {
+          var candidate = slots[anchorIndex + step];
+          if (candidate.night && candidate.quiet) {
+            quietStart = candidate;
+            break;
+          }
+        }
+      }
+      if (!quietStart) {
+        for (var qi = 0; qi < slots.length; qi++) {
+          if (slots[qi].night && slots[qi].quiet) {
+            quietStart = slots[qi];
+            break;
+          }
         }
       }
       return {
@@ -2670,11 +3022,16 @@ def build_time_slider_map(target_time, scale_pct):
         kind: kind,
         slots: slots,
         lightStats: lightStats,
-        venueRadiusM: NIGHT_VENUE_RADIUS_M,
-        lightGroups: pointSignalGroups(slots, "lit"),
-        openGroups: pointSignalGroups(slots, "open"),
-        combinedGroups: pointSignalGroups(slots, "combined"),
-        best: best
+        activityRadiusM: NIGHT_ACTIVITY_RADIUS_M,
+        activeGroups: pointSignalGroups(slots, "active"),
+        openGroups: pointSignalGroups(slots, "openSignal"),
+        zeroGroups: pointSignalGroups(slots, "zero"),
+        quietGroups: pointSignalGroups(slots, "quiet"),
+        best: bestActive || best,
+        bestOpen: bestOpen,
+        bestAny: best,
+        quietStart: quietStart,
+        lowestNight: lowestNight
       };
     }
 
@@ -2689,7 +3046,9 @@ def build_time_slider_map(target_time, scale_pct):
           start = null;
         }
       }
-      if (start !== null) groups.push({ start: start, end: 24 });
+      if (start !== null) {
+        groups.push({ start: start, end: slots[slots.length - 1].slot + 1 });
+      }
       return groups;
     }
 
@@ -2712,6 +3071,11 @@ def build_time_slider_map(target_time, scale_pct):
       return null;
     }
 
+    function isNightActivityKind(kind) {
+      return kind === "active" || kind === "quiet" ||
+        kind === "zero" || kind === "nearby-active";
+    }
+
     function currentPointWindowLabel(analysis, kind) {
       var slot = currentAnalysisSlot(analysis);
       if (!slot) return "";
@@ -2723,20 +3087,33 @@ def build_time_slider_map(target_time, scale_pct):
         return "Sun here: " + formatPct(slot.brightCoverage)
           + " at " + formatHour(slot.slot);
       }
+      if (isNightActivityKind(kind)) {
+        if (kind === "active" || kind === "zero") {
+          return "Activity here: " + Math.round(slot.activityScore || 0)
+            + " points at " + formatHour(slot.slot);
+        }
+        var prefix = kind === "nearby-active"
+          ? "Active area: "
+          : "Activity here: ";
+        return prefix + Math.round(slot.activityScore || 0)
+          + " points at " + formatHour(slot.slot);
+      }
       return "";
     }
 
     function renderPointWindowSummary(analysis, kind) {
       if (!pointWindowSummaryEl) return;
       pointWindowSummaryEl.innerHTML = "";
-      if (kind === "shade" || kind === "sun") {
+      if (kind === "shade" || kind === "sun" ||
+          isNightActivityKind(kind)) {
         var currentText = currentPointWindowLabel(analysis, kind);
         if (!currentText) return;
         var currentPill = document.createElement("span");
         currentPill.className = "lm-point-window-pill";
         var currentDot = document.createElement("span");
         currentDot.className = "lm-point-window-dot"
-          + (kind === "sun" ? " is-sun" : "");
+          + (kind === "sun" ? " is-sun" : "")
+          + (isNightActivityKind(kind) ? " is-active-night" : "");
         var currentLabel = document.createElement("span");
         currentLabel.textContent = currentText;
         currentPill.appendChild(currentDot);
@@ -2747,30 +3124,22 @@ def build_time_slider_map(target_time, scale_pct):
       }
       var groups = kind === "sun" ? analysis.brightGroups
         : kind === "shade" ? analysis.shadeGroups
-        : kind === "light" ? analysis.lightGroups
-        : kind === "open" ? analysis.openGroups
-        : analysis.combinedGroups;
+        : analysis.activeGroups;
       var pill = document.createElement("span");
       pill.className = "lm-point-window-pill";
       var dot = document.createElement("span");
       var dotClass = kind === "sun" ? " is-sun"
-        : kind === "light" ? " is-lit"
-        : kind === "open" ? " is-open"
-        : kind === "lit-open" ? " is-combined"
+        : isNightActivityKind(kind) ? " is-active-night"
         : "";
       dot.className = "lm-point-window-dot" + dotClass;
       var label = document.createElement("span");
       if (groups && groups.length) {
-        var prefix = kind === "light" ? "Light here: "
-          : kind === "open" ? "Open nearby: "
-          : "Light + open nearby: ";
+        var prefix = isNightActivityKind(kind) ? "Active window: " : "";
         label.textContent = prefix + formatGroups(groups);
       } else {
         label.textContent = kind === "sun" ? "No day sun here today"
           : kind === "shade" ? "No building shade here today"
-          : kind === "light" ? "No night light signal here today"
-          : kind === "open" ? "No nearby open-place window tonight"
-          : "No light + open-place overlap tonight";
+          : "No active nighttime window here today";
       }
       pill.appendChild(dot);
       pill.appendChild(label);
@@ -2789,21 +3158,46 @@ def build_time_slider_map(target_time, scale_pct):
         var el = document.createElement("div");
         var active = kind === "sun" ? slot.bright
           : kind === "shade" ? slot.shaded
-          : kind === "light" ? slot.lit
-          : kind === "open" ? slot.open
-          : slot.combined;
+          : kind === "active" ? slot.openSignal
+          : kind === "zero" ? slot.openSignal
+          : kind === "nearby-active" ? slot.openSignal
+          : isNightActivityKind(kind) ? slot.night
+          : false;
         el.className = "lm-point-window-segment"
           + (kind === "sun" && active ? " is-sun" : "")
           + (kind === "shade" && active ? " is-shade" : "")
-          + (kind === "light" && active ? " is-lit" : "")
-          + (kind === "open" && active ? " is-open" : "")
-          + (kind === "lit-open" && active ? " is-combined" : "")
+          + (isNightActivityKind(kind) && active
+            ? " is-active-night" : "")
           + (best && best.slot === slot.slot ? " is-best" : "");
         el.setAttribute("data-slot", String(slot.slot));
         if (kind === "shade" && active) {
           el.style.opacity = String(0.3 + slot.coverage * 0.7);
         } else if (kind === "sun" && active) {
           el.style.opacity = String(0.3 + slot.brightCoverage * 0.7);
+        } else if (isNightActivityKind(kind) && active) {
+          var activityIntensity = activityScoreIntensity(slot.activityScore);
+          el.style.opacity = String(
+            0.16 + Math.pow(activityIntensity, 1.35) * 0.84
+          );
+          if (slot.activityScore >= ACTIVITY_MAX_SCORE) {
+            el.style.backgroundColor = "#fed7aa";
+            el.style.boxShadow = (
+              "0 0 18px rgba(251, 146, 60, 0.78), "
+              + "0 0 5px rgba(255, 237, 213, 0.72)"
+            );
+          } else if (slot.activityScore >= 40) {
+            el.style.backgroundColor = "#fdba74";
+            el.style.boxShadow = "0 0 14px rgba(251, 146, 60, 0.62)";
+          } else if (slot.activityScore >= 30) {
+            el.style.backgroundColor = "#fb923c";
+            el.style.boxShadow = "0 0 11px rgba(251, 146, 60, 0.54)";
+          } else if (slot.activityScore >= 20) {
+            el.style.backgroundColor = "#f97316";
+            el.style.boxShadow = "0 0 8px rgba(249, 115, 22, 0.46)";
+          } else {
+            el.style.backgroundColor = "#c2410c";
+            el.style.boxShadow = "0 0 5px rgba(194, 65, 12, 0.32)";
+          }
         }
         el.title = formatHour(slot.slot) + " "
           + (kind === "sun" || kind === "shade"
@@ -2812,11 +3206,14 @@ def build_time_slider_map(target_time, scale_pct):
                 : "partial building shade ") + formatPct(slot.coverage)
               : slot.bright ? "day sun " + formatPct(slot.brightCoverage)
               : "low sun or night")
-            : (slot.combined ? "light and open places"
-              : slot.lit ? "night light"
-              : slot.open ? "open places nearby"
-              : slot.night ? "night, no selected signal"
-              : "daytime"));
+            : isNightActivityKind(kind)
+              ? (slot.night
+                ? (slot.openCount || 0) + " open place"
+                  + (slot.openCount === 1 ? "" : "s")
+                  + ", " + slot.lightCount + " light signal"
+                  + (slot.lightCount === 1 ? "" : "s")
+                : "daytime")
+              : "daytime");
         pointWindowEl.appendChild(el);
       }
       syncPointWindowToSlot();
@@ -2840,8 +3237,7 @@ def build_time_slider_map(target_time, scale_pct):
     }
 
     function formatHour(slot) {
-      if (slot >= 24) return "24:00";
-      return pad(slot) + ":00";
+      return pad(slotHour(slot)) + ":00" + (slot >= 24 ? " +1" : "");
     }
 
     function formatPct(value) {
@@ -2855,98 +3251,6 @@ def build_time_slider_map(target_time, scale_pct):
         out.push(formatHour(groups[i].start) + "-" + formatHour(groups[i].end));
       }
       return out.join(", ");
-    }
-
-    function pointSunSummary(analysis, kind) {
-      if (kind === "sun") {
-        if (!analysis.bestBright) {
-          return "No day-sun window was found for this point on "
-            + state.dateStr + ". This hourly scan uses building shadows only.";
-        }
-        return "Day sun reaches this point during "
-          + formatGroups(analysis.brightGroups) + " on " + state.dateStr
-          + ". Sunniest slot: " + formatHour(analysis.bestBright.slot)
-          + " with " + formatPct(analysis.bestBright.brightCoverage)
-          + " of the check circle open to sun"
-          + ". This hourly scan uses building shadows only. Tree canopy is "
-          + "shown separately as visual context.";
-      }
-      if (!analysis.bestShade) {
-        return "No building shade reaches this point on " + state.dateStr
-          + ". This hourly scan uses building shadows only. Tree canopy is "
-          + "shown separately as visual context.";
-      }
-      return "Building shade reaches this point during "
-        + formatGroups(analysis.shadeGroups) + " on " + state.dateStr
-        + ". Strongest slot: " + formatHour(analysis.bestShade.slot)
-        + " with " + formatPct(analysis.bestShade.coverage)
-        + " of the check circle covered"
-        + " and " + analysis.bestShade.count
-        + " overlapping shadow signal"
-        + (analysis.bestShade.count === 1 ? "" : "s")
-        + ". Tree canopy is shown separately as visual context.";
-    }
-
-    function placeExamples(places) {
-      if (!places || !places.length) return "";
-      var names = [];
-      for (var i = 0; i < places.length && i < 3; i++) {
-        names.push(places[i].name);
-      }
-      return names.join(", ");
-    }
-
-    function pointNightSummary(analysis, kind) {
-      var groups = kind === "light" ? analysis.lightGroups
-        : kind === "open" ? analysis.openGroups
-        : analysis.combinedGroups;
-      var lightStats = analysis.lightStats;
-      if (!groups || !groups.length) {
-        if (kind === "light") {
-          return "No nearby streetlight signal was found for this point tonight. "
-            + "The check looked within " + lightStats.radiusM
-            + " m and uses public streetlight records as visibility context.";
-        }
-        if (kind === "open") {
-          return "No nearby open-place window was found tonight. The check "
-            + "looked within " + analysis.venueRadiusM
-            + " m and only uses venues with OSM opening-hours data.";
-        }
-        return "No overlap was found tonight between nearby streetlight "
-          + "signals and open places. This is visibility context, not a "
-          + "personal safety claim.";
-      }
-      var best = analysis.best;
-      if (kind === "light") {
-        return "Nearby night lighting is present during "
-          + formatGroups(groups) + " on " + state.dateStr
-          + ". The check found " + lightStats.count
-          + " streetlight signal" + (lightStats.count === 1 ? "" : "s")
-          + " within " + lightStats.radiusM + " m"
-          + (lightStats.nearestM === null ? "."
-            : ", nearest about " + lightStats.nearestM + " m away.")
-          + " This is visibility context, not a personal safety claim.";
-      }
-      if (kind === "open") {
-        return "Nearby places are open during " + formatGroups(groups)
-          + " on " + state.dateStr + ". Best slot: "
-          + formatHour(best.slot) + " with " + best.openCount
-          + " open place" + (best.openCount === 1 ? "" : "s")
-          + " within " + analysis.venueRadiusM + " m"
-          + (placeExamples(best.places)
-            ? ". Examples: " + placeExamples(best.places) + "."
-            : ".")
-          + " This only reflects venues with OSM opening-hours data.";
-      }
-      return "Nearby lighting and open places overlap during "
-        + formatGroups(groups) + " on " + state.dateStr
-        + ". Best slot: " + formatHour(best.slot)
-        + " with " + lightStats.count + " streetlight signal"
-        + (lightStats.count === 1 ? "" : "s")
-        + " and " + best.openCount + " open place"
-        + (best.openCount === 1 ? "" : "s")
-        + " nearby. This is visibility and activity context, not a "
-        + "personal safety claim.";
     }
 
     function renderShadows(altDeg, azDeg) {
@@ -3005,84 +3309,112 @@ def build_time_slider_map(target_time, scale_pct):
       };
     }
 
-    function syncIncidentLayers(nightMix) {
-      var showIncidents = state.incidentsOn && nightMix > 0.5;
-      if (showIncidents) {
-        if (!map.hasLayer(crime)) crime.addTo(map);
-        if (!map.hasLayer(crash)) crash.addTo(map);
-      } else {
-        if (map.hasLayer(crime)) map.removeLayer(crime);
-        if (map.hasLayer(crash)) map.removeLayer(crash);
-      }
-    }
-
-    function renderTheme(altDeg) {
-      // nightMix goes 1 -> 0 smoothly as the sun climbs from
-      // TWILIGHT_START to DAY_THRESHOLD. Below TWILIGHT_START the sky
-      // is solid night; above DAY_THRESHOLD the day basemap stands on
-      // its own. The dark tile fades by opacity so the scene brightens
-      // gradually. Streetlights + food stay on through the transition
-      // and clear out at DAY_THRESHOLD.
-      var nightMix = nightMixForAltitude(altDeg);
+    function renderTheme() {
+      // Keep the basemap binary. A blended opacity transition between
+      // day and night reads as a muddy gray state.
+      var nightMix = isNightSlot(state.slot) ? 1 : 0;
       state.nightMix = nightMix;
+      var twilight = nightMix <= 0.5 && state.lastSun &&
+        state.lastSun.alt < DAY_THRESHOLD;
+      var phase = phaseForSlot(state.slot);
+      if (phaseEl) {
+        phaseEl.textContent = phase.label;
+        phaseEl.setAttribute("data-phase", phase.key);
+      }
+      host.setAttribute("data-phase", phase.key);
+      if (iconEl) {
+        iconEl.setAttribute("data-phase", phase.key);
+      }
 
       if (nightMix > 0) {
         if (!map.hasLayer(dark)) dark.addTo(map);
         dark.setOpacity(nightMix);
         if (!map.hasLayer(lights)) lights.addTo(map);
+        applyStreetlightGlowZoom();
       } else {
         if (map.hasLayer(dark)) map.removeLayer(dark);
         if (map.hasLayer(lights)) map.removeLayer(lights);
       }
 
-      // Slider chrome flips on dominant mix. The 0.5 crossover lines
-      // up with altitude -0.5 (roughly true sunrise/sunset) so the
-      // slider color aligns with the marker position.
-      //
-      // Incident history is a reference layer, not the point of the
-      // night experience. It only appears when the user explicitly
-      // asks for it, and still remains night-gated.
+      map.getContainer().classList.toggle("lm-twilight", !!twilight);
       if (nightMix > 0.5) {
         host.classList.add("night");
+        host.classList.remove("twilight");
         iconEl.textContent = "\u263E";
       } else {
         host.classList.remove("night");
+        host.classList.toggle("twilight", !!twilight);
         iconEl.textContent = "\u2600";
       }
-      syncIncidentLayers(nightMix);
     }
 
     function updateSunMarkers() {
       var p = parseDateStr(state.dateStr);
       // Noon Boston time is a safe reference for sunrise/sunset.
       var noon = bostonDate(p.y, p.m, p.d, 12, 0);
+      var nextBase = new Date(Date.UTC(p.y, p.m, p.d + 1, 12, 0));
+      var nextNoon = bostonDate(
+        nextBase.getUTCFullYear(),
+        nextBase.getUTCMonth(),
+        nextBase.getUTCDate(),
+        12,
+        0
+      );
       var t = SunCalc.getTimes(noon, LAT_CENTER, LON_CENTER);
+      var nextT = SunCalc.getTimes(nextNoon, LAT_CENTER, LON_CENTER);
       if (!t.sunrise || isNaN(t.sunrise.getTime())) return;
       var off = bostonUtcOffset(p.y, p.m, p.d);
+      var nextOff = bostonUtcOffset(
+        nextBase.getUTCFullYear(),
+        nextBase.getUTCMonth(),
+        nextBase.getUTCDate()
+      );
       // Convert UTC to Boston local hour/min so the slider mapping
       // (slot = local hour) is consistent.
-      function localHm(dt) {
+      function localHm(dt, utcOffset) {
         var utcH = dt.getUTCHours() + (dt.getUTCMinutes() / 60);
-        var localH = (utcH + off + 24) % 24;
+        var localH = (utcH + utcOffset + 24) % 24;
         var hh = Math.floor(localH);
         var mm = Math.round((localH - hh) * 60);
         if (mm === 60) { hh = (hh + 1) % 24; mm = 0; }
         return [hh, mm];
       }
-      var sr = localHm(t.sunrise);
-      var ss = localHm(t.sunset);
+      var sr = localHm(t.sunrise, off);
+      var ss = localHm(t.sunset, off);
       var srFrac = sr[0] + sr[1] / 60;
       var ssFrac = ss[0] + ss[1] / 60;
-      // Slot 0..23 maps to hours 0..23. The slider thumb travels
-      // across the full track, so position 0% = hour 0, 100% = hour 23.
-      var pctSr = (srFrac / 23) * 100;
-      var pctSs = (ssFrac / 23) * 100;
-      srMarker.style.left = pctSr + "%";
-      ssMarker.style.left = pctSs + "%";
-      srLabel.style.left = pctSr + "%";
-      ssLabel.style.left = pctSs + "%";
-      srLabel.textContent = pad(sr[0]) + ":" + pad(sr[1]);
-      ssLabel.textContent = pad(ss[0]) + ":" + pad(ss[1]);
+      function placeMarker(marker, label, slotFrac, text) {
+        if (!marker || !label) return;
+        if (slotFrac < TIMELINE_START_SLOT || slotFrac > TIMELINE_END_SLOT) {
+          marker.style.display = "none";
+          label.style.display = "none";
+          return;
+        }
+        var pct = (
+          (slotFrac - TIMELINE_START_SLOT) /
+          (TIMELINE_END_SLOT - TIMELINE_START_SLOT)
+        ) * 100;
+        marker.style.display = "";
+        label.style.display = "";
+        marker.style.left = pct + "%";
+        label.style.left = pct + "%";
+        label.textContent = text;
+      }
+      placeMarker(
+        srMarker, srLabel, srFrac, pad(sr[0]) + ":" + pad(sr[1])
+      );
+      placeMarker(
+        ssMarker, ssLabel, ssFrac, pad(ss[0]) + ":" + pad(ss[1])
+      );
+      if (nextT.sunrise && !isNaN(nextT.sunrise.getTime()) &&
+          nsMarker && nsLabel) {
+        var ns = localHm(nextT.sunrise, nextOff);
+        var nsFrac = 24 + ns[0] + ns[1] / 60;
+        placeMarker(
+          nsMarker, nsLabel, nsFrac,
+          pad(ns[0]) + ":" + pad(ns[1]) + " +1"
+        );
+      }
     }
 
     // Render pipeline: cheap light update runs synchronously on every
@@ -3097,15 +3429,15 @@ def build_time_slider_map(target_time, scale_pct):
         pendingRender = null;
       var s = sunAt(state.dateStr, state.slot);
       state.lastSun = s;
-      renderTheme(s.alt);
+      renderTheme();
       renderShadows(s.alt, s.az);
-      renderPois(s.alt);
+      renderPois();
       });
     }
 
     function updateScene() {
       var s = sunAt(state.dateStr, state.slot);
-      timeEl.textContent = pad(s.hour) + ":" + pad(s.min);
+      timeEl.textContent = formatHour(state.slot);
       rangeEl.value = state.slot;
       scheduleRender();
       syncPointWindowToSlot();
@@ -3115,14 +3447,6 @@ def build_time_slider_map(target_time, scale_pct):
       state.slot = parseInt(rangeEl.value, 10);
       updateScene();
     });
-
-    if (incidentEl) {
-      incidentEl.addEventListener("change", function() {
-        state.incidentsOn = !!incidentEl.checked;
-        var s = sunAt(state.dateStr, state.slot);
-        renderTheme(s.alt);
-      });
-    }
 
     dateEl.addEventListener("change", function() {
       if (!dateEl.value) return;
@@ -3237,41 +3561,8 @@ def build_time_slider_map(target_time, scale_pct):
     }
 
     // --- Heat-response overlay ---
-    // 3-step fallback: shade -> cooling -> ER. ER markers always
-    // visible (24h). Cooling markers appear only when weather fetch
-    // crosses HEAT_* thresholds. Info panel badge flags the state.
-    var erLayer = L.layerGroup();
-    for (var ei = 0; ei < MEDICAL.length; ei++) {
-      var er = MEDICAL[ei];
-      // Only 24-hour ERs render. Non-emergency hospitals are kept in
-      // the data but hidden — out of scope for the heat-response
-      // 3-step fallback (shade -> cooling -> ER).
-      if (!er.is_er) continue;
-      var erIcon = L.divIcon({
-        className: 'lm-er',
-        iconSize: [14, 14], iconAnchor: [7, 7],
-        html: '<div style="background:#dc2626;color:#fff;'
-            + 'border:1.5px solid #fff;border-radius:3px;'
-            + 'width:14px;height:14px;display:flex;'
-            + 'align-items:center;justify-content:center;'
-            + 'font-weight:900;font-size:11px;'
-            + 'box-shadow:0 1px 3px rgba(0,0,0,0.35);">+</div>'
-      });
-      var erM = L.marker([er.lat, er.lon], { icon: erIcon });
-      var erPop = '<div style="font-family:sans-serif;font-size:12px;'
-                + 'min-width:160px;"><b>' + (er.name || "Emergency Room")
-                + '</b><br><span style="color:#dc2626;font-weight:700;">'
-                + '24-hour ER</span>';
-      if (er.addr) erPop += '<br><span style="color:#64748b;">'
-                          + er.addr + '</span>';
-      if (er.phone) erPop += '<br><span style="color:#64748b;">'
-                           + er.phone + '</span>';
-      erPop += '</div>';
-      erM.bindPopup(erPop, { maxWidth: 220 });
-      erM.addTo(erLayer);
-    }
-    erLayer.addTo(map);
-
+    // Cooling markers appear only when weather fetch crosses HEAT_*
+    // thresholds. Emergency-room markers are intentionally omitted.
     var coolingLayer = L.layerGroup();
     for (var ci = 0; ci < COOLING.length; ci++) {
       var cl = COOLING[ci];
@@ -3434,14 +3725,45 @@ def build_time_slider_map(target_time, scale_pct):
       return cells.slice(0, 8);
     }
 
+    function makeNearbyActiveCandidates() {
+      var b = map.getBounds();
+      var west = b.getWest(), east = b.getEast();
+      var south = b.getSouth(), north = b.getNorth();
+      var cols = 5, rows = 5;
+      var ref = activeReferencePoint();
+      var candidates = [];
+      for (var y = 0; y < rows; y++) {
+        for (var x = 0; x < cols; x++) {
+          var lat = south + (north - south) * (y + 0.5) / rows;
+          var lon = west + (east - west) * (x + 0.5) / cols;
+          var analysis = analyzePointNight(lat, lon, "nearby-active");
+          var best = analysis.best;
+          var dist = distanceM(lat, lon, ref.lat, ref.lon);
+          var rawScore = best ? best.activityScore : 0;
+          var nearbyFactor = dist < 55 ? 0.45 : 1;
+          candidates.push({
+            id: "nearby-active-" + x + "-" + y,
+            kind: "nearby-active",
+            lat: lat,
+            lon: lon,
+            radiusM: NIGHT_ACTIVITY_RADIUS_M,
+            analysis: analysis,
+            best: best,
+            rawScore: rawScore,
+            distanceM: dist,
+            score: rawScore * nearbyFactor / (1 + dist / 700)
+          });
+        }
+      }
+      candidates.sort(function(a, b) { return b.score - a.score; });
+      return candidates.slice(0, 8);
+    }
+
     function actionQuestion(action) {
       if (action === "shade") return "Find the best nearby shade area.";
       if (action === "bright") return "Find the brightest nearby area at night.";
-      if (action === "point-light") return "When is this area lit?";
-      if (action === "point-open") return "When are nearby places open?";
-      if (action === "point-lit-open") {
-        return "When is light and activity nearby?";
-      }
+      if (action === "point-active") return "Active Time";
+      if (action === "point-zero") return "Inactive Time";
       return "Summarize the selected map evidence.";
     }
 
@@ -3457,7 +3779,6 @@ def build_time_slider_map(target_time, scale_pct):
         mode: agentMode(),
         sun: state.lastSun,
         heat: { active: state.heatOn, weather: weatherText },
-        incidents: { enabled: state.incidentsOn },
         location: state.userLocation,
         viewport: {
           center: { lat: c.lat, lon: c.lng },
@@ -3473,20 +3794,20 @@ def build_time_slider_map(target_time, scale_pct):
           treesShown: !!(state.treeLayer && map.hasLayer(state.treeLayer)),
           streetlightsShown: map.hasLayer(lights),
           openVenuesShown: poiLayer.getLayers().length,
-          coolingShown: map.hasLayer(coolingLayer),
-          erShown: map.hasLayer(erLayer)
+          coolingShown: map.hasLayer(coolingLayer)
         },
         counts: STATIC_COUNTS,
         caveats: [
           "Tree canopy is a static shade overlay.",
-          "Streetlights and venues are public-data visibility context.",
-          "Historic incidents are optional references, not safety predictions."
+          "Streetlights and venues are public-data visibility context."
         ]
       };
     }
 
     function setAgentAnswer(text) {
-      if (agentAnswerEl) agentAnswerEl.textContent = text;
+      if (!agentAnswerEl) return;
+      agentAnswerEl.textContent = text || "";
+      agentAnswerEl.classList.toggle("is-empty", !text);
     }
 
     function setAgentStatus(text) {
@@ -3516,9 +3837,8 @@ def build_time_slider_map(target_time, scale_pct):
     }
 
     function agentActionColor(kind) {
-      return (kind === "bright" || kind === "sun" ||
-              kind === "light" || kind === "lit-open") ? "#eab308"
-        : kind === "open" ? "#38bdf8"
+      return (kind === "bright" || kind === "sun") ? "#eab308"
+        : isNightActivityKind(kind) ? "#fb923c"
         : kind === "shade" ? "#2563eb"
         : "#2563eb";
     }
@@ -3608,9 +3928,8 @@ def build_time_slider_map(target_time, scale_pct):
       }).addTo(map);
       var scanLabel = action === "point-sun" ? "Checking sun windows..."
         : action === "point-shade" ? "Checking shade windows..."
-        : action === "point-light" ? "Checking light windows..."
-        : action === "point-open" ? "Checking open-place windows..."
-        : action === "point-lit-open" ? "Checking light + activity..."
+        : action === "point-active" ? "Checking active time..."
+        : action === "point-zero" ? "Checking inactive time..."
         : kind === "bright" ? "Checking light signals..."
         : kind === "shade" ? "Checking shade signals..."
         : "Reading this view...";
@@ -3618,13 +3937,14 @@ def build_time_slider_map(target_time, scale_pct):
         interactive: false,
         icon: L.divIcon({
           className: "lm-agent-scan-label",
-          iconSize: [156, 24],
-          iconAnchor: [78, 28],
+          iconSize: [1, 1],
+          iconAnchor: [0, 28],
           html: (
             '<div style="display:inline-block;background:rgba(255,255,255,0.94);'
             + 'color:#1e293b;border:1px solid rgba(148,163,184,0.45);'
             + 'border-radius:6px;padding:5px 9px;font-size:12px;'
-            + 'font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,0.18);">'
+            + 'font-weight:700;white-space:nowrap;transform:translateX(-50%);'
+            + 'box-shadow:0 2px 8px rgba(0,0,0,0.18);">'
             + scanLabel + '</div>'
           )
         })
@@ -3635,12 +3955,13 @@ def build_time_slider_map(target_time, scale_pct):
     function agentHighlightLabelIcon(label) {
       return L.divIcon({
         className: "lm-agent-highlight-label",
-        iconSize: [150, 24],
-        iconAnchor: [75, 28],
+        iconSize: [1, 1],
+        iconAnchor: [0, 28],
         html: (
           '<div style="display:inline-block;background:rgba(15,23,42,0.88);'
           + 'color:#fff;border-radius:6px;padding:5px 9px;font-size:12px;'
-          + 'font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,0.24);">'
+          + 'font-weight:700;white-space:nowrap;transform:translateX(-50%);'
+          + 'box-shadow:0 2px 8px rgba(0,0,0,0.24);">'
           + escapeHtml(label || "Selected area") + '</div>'
         )
       });
@@ -3648,17 +3969,35 @@ def build_time_slider_map(target_time, scale_pct):
 
     function syncAgentHighlightToSlot() {
       var kind = state.pointWindowKind;
-      if (kind !== "shade" && kind !== "sun") return;
+      if (kind !== "shade" && kind !== "sun" &&
+          !isNightActivityKind(kind)) {
+        return;
+      }
       if (!state.pointWindowAnalysis) return;
       var slot = currentAnalysisSlot(state.pointWindowAnalysis);
       if (!slot) return;
-      var coverage = kind === "sun" ? slot.brightCoverage : slot.coverage;
-      var label = kind === "sun"
-        ? "Sun " + formatPct(coverage) + " at " + formatHour(slot.slot)
-        : "Shadow " + formatPct(coverage) + " at " + formatHour(slot.slot);
+      var coverage = isNightActivityKind(kind)
+        ? Math.max(
+          0,
+          Math.min(1, (slot.activityScore || 0) / ACTIVITY_MAX_SCORE)
+        )
+        : kind === "sun" ? slot.brightCoverage : slot.coverage;
+      var label = kind === "active"
+        ? "Activity " + Math.round(slot.activityScore || 0) + " points at "
+          + formatHour(slot.slot)
+        : isNightActivityKind(kind)
+        ? (kind === "nearby-active" ? "Active nearby " : "Activity ")
+          + Math.round(slot.activityScore || 0) + " points at "
+          + formatHour(slot.slot)
+        : kind === "sun"
+          ? "Sun " + formatPct(coverage) + " at " + formatHour(slot.slot)
+          : "Shadow " + formatPct(coverage) + " at "
+            + formatHour(slot.slot);
       if (state.agentHighlight) {
         state.agentHighlight.setStyle({
-          fillOpacity: 0.08 + Math.max(0, Math.min(1, coverage)) * 0.28
+          fillOpacity: isNightActivityKind(kind)
+            ? activityHighlightOpacity(coverage)
+            : 0.08 + Math.max(0, Math.min(1, coverage)) * 0.28
         });
       }
       if (state.agentHighlightLabel) {
@@ -3678,7 +4017,10 @@ def build_time_slider_map(target_time, scale_pct):
       var intensity = typeof highlight.coverage === "number"
         ? Math.max(0, Math.min(1, highlight.coverage))
         : null;
-      var fillOpacity = intensity === null ? 0.18 : 0.08 + intensity * 0.28;
+      var fillOpacity = intensity === null ? 0.18
+        : isNightActivityKind(kind)
+          ? activityHighlightOpacity(intensity)
+          : 0.08 + intensity * 0.28;
       state.agentHighlight = L.circle([highlight.lat, highlight.lon], {
         radius: highlight.radiusM || 180,
         color: color,
@@ -3769,11 +4111,7 @@ def build_time_slider_map(target_time, scale_pct):
       };
       setAgentBusy(action, true);
       setAgentStatus("working...");
-      setAgentAnswer(
-        kind === "sun"
-          ? "Scanning day-sun windows for this point..."
-          : "Scanning building-shade windows for this point..."
-      );
+      setAgentAnswer("");
       drawAgentScan(preview, action);
       requestAnimationFrame(function() {
         var analysis = analyzePointSun(loc.lat, loc.lon);
@@ -3803,7 +4141,7 @@ def build_time_slider_map(target_time, scale_pct):
               : 0
           }, kind);
           renderPointWindowTrack(analysis, kind, best);
-          setAgentAnswer(pointSunSummary(analysis, kind));
+          setAgentAnswer("");
         });
       });
     }
@@ -3814,32 +4152,26 @@ def build_time_slider_map(target_time, scale_pct):
         setAgentLocation(center.lat, center.lng, null, "map center");
       }
       var loc = state.userLocation;
-      var kind = action === "point-light" ? "light"
-        : action === "point-open" ? "open"
-        : "lit-open";
+      var kind = action === "point-zero" ? "zero" : "active";
       var runId = state.agentRunId + 1;
       state.agentRunId = runId;
       var startedAt = Date.now();
       var preview = {
         lat: loc.lat,
         lon: loc.lon,
-        radiusM: POINT_CHECK_RADIUS_M,
-        label: kind === "light" ? "Checking light"
-          : kind === "open" ? "Checking open places"
-          : "Checking overlap",
+        radiusM: NIGHT_ACTIVITY_RADIUS_M,
+        label: kind === "zero" ? "Checking inactive time" : "Checking active time",
         kind: kind
       };
       setAgentBusy(action, true);
       setAgentStatus("working...");
-      setAgentAnswer(
-        kind === "light" ? "Scanning night-light windows for this area..."
-          : kind === "open" ? "Scanning nearby open-place windows..."
-          : "Scanning light and activity overlap..."
-      );
+      setAgentAnswer("");
       drawAgentScan(preview, action);
       requestAnimationFrame(function() {
         var analysis = analyzePointNight(loc.lat, loc.lon, kind);
-        var best = analysis.best;
+        var best = kind === "zero"
+          ? firstMatchingNightSlot(analysis.slots, "zero", state.slot)
+          : analysis.bestOpen || analysis.best;
         finishAgentRun(runId, startedAt, function() {
           setAgentStatus("computed");
           renderPointWindowTrack(analysis, kind, best);
@@ -3851,17 +4183,65 @@ def build_time_slider_map(target_time, scale_pct):
           drawAgentHighlight({
             lat: loc.lat,
             lon: loc.lon,
-            radiusM: POINT_CHECK_RADIUS_M,
+            radiusM: NIGHT_ACTIVITY_RADIUS_M,
             label: best
-              ? (kind === "light" ? "Lit at " + formatHour(best.slot)
-                : kind === "open" ? "Open nearby at " + formatHour(best.slot)
-                : "Light + open at " + formatHour(best.slot))
-              : (kind === "light" ? "No nearby light"
-                : kind === "open" ? "No nearby open places"
-                : "No overlap tonight"),
-            kind: kind
+              ? "Activity " + Math.round(best.activityScore || 0)
+                + " points at "
+                + formatHour(best.slot)
+              : (kind === "zero" ? "No zero window" : "Activity 0 points"),
+            kind: kind,
+            coverage: best ? best.activityScore / ACTIVITY_MAX_SCORE : 0
           }, kind);
-          setAgentAnswer(pointNightSummary(analysis, kind));
+          setAgentAnswer("");
+        });
+      });
+    }
+
+    function runNearbyActiveAction(action) {
+      if (!state.userLocation) {
+        var center = map.getCenter();
+        setAgentLocation(center.lat, center.lng, null, "map center");
+      }
+      var ref = activeReferencePoint();
+      var runId = state.agentRunId + 1;
+      state.agentRunId = runId;
+      var startedAt = Date.now();
+      var preview = {
+        lat: ref.lat,
+        lon: ref.lon,
+        radiusM: NIGHT_ACTIVITY_RADIUS_M,
+        label: "Checking nearby activity",
+        kind: "nearby-active"
+      };
+      setAgentBusy(action, true);
+      setAgentStatus("working...");
+      setAgentAnswer("");
+      drawAgentScan(preview, action);
+      requestAnimationFrame(function() {
+        var candidates = makeNearbyActiveCandidates();
+        var top = candidates && candidates.length ? candidates[0] : null;
+        finishAgentRun(runId, startedAt, function() {
+          setAgentStatus("computed");
+          if (!top || !top.best ||
+              top.best.activityScore < NIGHT_ACTIVE_SCORE) {
+            setAgentAnswer("");
+            return;
+          }
+          top.analysis.nearbyDistanceM = Math.round(top.distanceM);
+          state.slot = top.best.slot;
+          rangeEl.value = top.best.slot;
+          updateScene();
+          renderPointWindowTrack(top.analysis, "nearby-active", top.best);
+          drawAgentHighlight({
+            lat: top.lat,
+            lon: top.lon,
+            radiusM: top.radiusM,
+            label: "Activity " + Math.round(top.best.activityScore)
+              + " points at " + formatHour(top.best.slot),
+            kind: "nearby-active",
+            coverage: top.best.activityScore / ACTIVITY_MAX_SCORE
+          }, "nearby-active");
+          setAgentAnswer("");
         });
       });
     }
@@ -3872,8 +4252,7 @@ def build_time_slider_map(target_time, scale_pct):
         var action = this.getAttribute("data-action") || "view";
         if (action === "point-shade" || action === "point-sun") {
           runPointSunAction(action);
-        } else if (action === "point-light" || action === "point-open" ||
-                   action === "point-lit-open") {
+        } else if (action === "point-active" || action === "point-zero") {
           runPointNightAction(action);
         } else if (action === "shade" || action === "bright") {
           ensureReferenceLocation(function() { runAgentAction(action); });
@@ -3884,7 +4263,7 @@ def build_time_slider_map(target_time, scale_pct):
     }
     map.on("click", function(e) {
       setAgentLocation(e.latlng.lat, e.latlng.lng, null, "map pin");
-      setAgentAnswer("Point selected.");
+      setAgentAnswer("");
     });
 
     // Pan or zoom changes the viewport, so the culled shadow set must
@@ -3892,6 +4271,9 @@ def build_time_slider_map(target_time, scale_pct):
     map.on("moveend", function() {
       shadowCache.clear();
       scheduleRender();
+    });
+    map.on("zoomend", function() {
+      applyStreetlightGlowZoom();
     });
 
     playEl.addEventListener("click", function() {
@@ -3901,9 +4283,17 @@ def build_time_slider_map(target_time, scale_pct):
         state.playing = false;
         playIconEl.textContent = "\u25B6";
       } else {
+        if (state.slot >= TIMELINE_END_SLOT) return;
         // Fixed 1 s cadence regardless of per-slot render cost.
         state.playTimer = setInterval(function() {
-          state.slot = (state.slot + 1) % 24;
+          if (state.slot >= TIMELINE_END_SLOT) {
+            clearInterval(state.playTimer);
+            state.playTimer = null;
+            state.playing = false;
+            playIconEl.textContent = "\u25B6";
+            return;
+          }
+          state.slot += 1;
           updateScene();
         }, 1000);
         state.playing = true;
@@ -3935,8 +4325,6 @@ def build_time_slider_map(target_time, scale_pct):
         .replace("__TREES_PNG_URL__", _trees_png_relpath)
         .replace("__TREES_BBOX__",
                  json.dumps(trees_png_bbox, separators=(",", ":")))
-        .replace("__MEDICAL__",
-                 json.dumps(medical, separators=(",", ":")))
         .replace("__COOLING__",
                  json.dumps(cooling, separators=(",", ":")))
         .replace("__HEAT_TMAX_F__", str(HEAT_TMAX_F))
@@ -3947,16 +4335,11 @@ def build_time_slider_map(target_time, scale_pct):
             "trees": len(trees_static),
             "streetlights": len(coords),
             "venues": len(osm_pois),
-            "emergencyRooms": sum(1 for m in medical if m.get("is_er")),
             "coolingOptions": len(cooling),
-            "historicIncidents": len(crime_points),
-            "violentIncidentPins": len(violent_crime),
         }, separators=(",", ":")))
         .replace("__MAP_NAME__", m.get_name())
         .replace("__DARK_NAME__", dark_tiles.get_name())
         .replace("__STREET_NAME__", streetlight_group.get_name())
-        .replace("__CRIME_NAME__", crime_group.get_name())
-        .replace("__CRASH_NAME__", crash_group.get_name())
         .replace("__INITIAL_DATE__", target_time.strftime("%Y-%m-%d"))
         .replace("__CENTER_LAT__", str(MAP_CENTER[0]))
         .replace("__CENTER_LON__", str(MAP_CENTER[1])))
@@ -3968,26 +4351,9 @@ def build_time_slider_map(target_time, scale_pct):
         folium.Element(slider_css + slider_html + slider_js)
     )
 
-    date_str = target_time.strftime("%b %d, %Y")
     _add_info_panel(m, [
-        "<b>LightMap</b> &mdash; Time Slider",
-        f'<span style="color:#64748b;">{date_str}</span>',
-        f"{building_count:,} buildings &middot; {len(trees_static):,} "
-        "trees (static) &middot; {:,} venues".format(len(osm_pois)),
-        f'<span style="color:#94a3b8; font-size:12px;">Incident reference: '
-        f'{len(crime_points):,} incidents + {len(violent_crime):,} '
-        f'violent-crime pins (2yr, optional)</span>',
-        '<span id="lm-weather" style="color:#64748b; font-size:12px;">'
-        "Loading weather...</span>"
-        '<span id="lm-heat-badge" style="display:none; margin-left:8px; '
-        'background:#dc2626; color:#fff; padding:2px 8px; border-radius:10px; '
-        'font-size:11px; font-weight:700; letter-spacing:0.4px;">HEAT</span>',
-        '<span style="color:#94a3b8; font-size:12px;">Heat-response: '
-        f'{sum(1 for m in medical if m.get("is_er")):,} 24h ER + '
-        f'{len(cooling):,} cooling (proxy)</span>',
-        '<span style="color:#64748b; font-size:12px;">'
-        "Drag time or pick a date. Venues toggle on/off by their "
-        "real opening hours.</span>",
+        "<b>LightMap</b> &mdash; Shade by day. Light by night."
+        '<span id="lm-weather" style="display:none;"></span>',
     ])
 
     return m
