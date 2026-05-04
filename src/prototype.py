@@ -3911,7 +3911,7 @@ def build_time_slider_map(target_time, scale_pct):
         return "Static preview mode: the map can be viewed, but LightTime Agent needs the local API server. Add OPENAI_API_KEY to .env, then run .venv/bin/python scripts/serve_agent.py 8765 docs and open http://localhost:8765/LightMap.html.";
       }
       if (state.agentBackend === "unavailable") {
-        return "LightTime Agent is not connected. Add OPENAI_API_KEY to .env, run .venv/bin/python scripts/serve_agent.py 8765 docs, then open the localhost URL.";
+        return "LightTime Agent is not connected. Add OPENAI_API_KEY to .env.";
       }
       return "Checking LightTime Agent connection...";
     }
