@@ -22,6 +22,13 @@ def wkb_loads_batch(wkb_blobs):
     """Decode many WKB blobs in one shapely ufunc call."""
     return shapely_module.from_wkb([bytes(b) for b in wkb_blobs]).tolist()
 
+from city_config import (
+    DEFAULT_CITY_ID,
+    height_from_properties_ft,
+    load_city_profile,
+    point_in_bbox,
+    profile_data_path,
+)
 from shadow.compute import (
     compute_all_shadows,
     compute_shadow_coverage,
@@ -33,7 +40,6 @@ from shadow.compute import (
 )
 from render.strategies import (
     DEFAULT_RENDER_STRATEGY,
-    INITIAL_BBOX,
     RENDER_STRATEGIES,
     SHADOW_CMAP_COLORS,
     add_building_layer,
@@ -53,6 +59,8 @@ except ImportError:
 
 def _postgis_enabled():
     """PostGIS is used only if the driver imports AND the connection works."""
+    if CITY.id != DEFAULT_CITY_ID:
+        return False
     if not _POSTGIS_AVAILABLE:
         return False
     if os.environ.get("LIGHTMAP_NO_POSTGIS"):
@@ -64,22 +72,54 @@ def _postgis_enabled():
     except Exception:
         return False
 
-BOSTON_TZ = ZoneInfo("US/Eastern")
-MAP_CENTER = [42.3601, -71.0942]  # MIT Kresge Oval, inside INITIAL_BBOX
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+CITY = load_city_profile(DEFAULT_CITY_ID)
+LOCAL_TZ = ZoneInfo(CITY.timezone)
+MAP_CENTER = list(CITY.center)
+INITIAL_BBOX = CITY.bbox
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "docs")
 
-BOSTON_BUILDINGS_PATH = os.path.join(DATA_DIR, "buildings", "boston_buildings.geojson")
-CAMBRIDGE_BUILDINGS_PATH = os.path.join(
-    DATA_DIR, "cambridge", "buildings", "buildings.geojson"
+BUILDINGS_DB_PATH = profile_data_path(CITY, "buildings_db", "buildings.db")
+OSM_POIS_PATH = profile_data_path(CITY, "osm_pois", "osm", "pois.geojson")
+MEDICAL_PATH = profile_data_path(CITY, "medical", "osm", "medical.geojson")
+COOLING_PATH = profile_data_path(CITY, "cooling", "cooling", "cooling.geojson")
+TREES_PATH = profile_data_path(CITY, "trees", "trees", "trees.geojson")
+CRIME_PATH = profile_data_path(CITY, "crime", "safety", "crime.geojson")
+CRASH_PATH = profile_data_path(CITY, "crashes", "safety", "crashes.geojson")
+FOOD_ESTABLISHMENTS_PATH = profile_data_path(
+    CITY, "food_establishments", "safety", "food_establishments.csv"
 )
-BUILDINGS_DB_PATH = os.path.join(DATA_DIR, "buildings.db")
-OSM_POIS_PATH = os.path.join(DATA_DIR, "osm", "pois.geojson")
-MEDICAL_PATH = os.path.join(DATA_DIR, "osm", "medical.geojson")
-COOLING_PATH = os.path.join(DATA_DIR, "cooling", "cooling.geojson")
-TREES_PATH = os.path.join(DATA_DIR, "trees", "trees.geojson")
-CRIME_PATH = os.path.join(DATA_DIR, "safety", "crime.geojson")
-CRASH_PATH = os.path.join(DATA_DIR, "safety", "crashes.geojson")
+TREES_CANOPY_PNG = (
+    "trees_canopy.png"
+    if CITY.id == DEFAULT_CITY_ID
+    else f"trees_canopy_{CITY.id}.png"
+)
+
+
+def set_active_city(city):
+    global CITY, LOCAL_TZ, MAP_CENTER, INITIAL_BBOX
+    global BUILDINGS_DB_PATH, OSM_POIS_PATH, MEDICAL_PATH, COOLING_PATH
+    global TREES_PATH, CRIME_PATH, CRASH_PATH, FOOD_ESTABLISHMENTS_PATH
+    global TREES_CANOPY_PNG
+
+    CITY = city
+    LOCAL_TZ = ZoneInfo(city.timezone)
+    MAP_CENTER = list(city.center)
+    INITIAL_BBOX = city.bbox
+    BUILDINGS_DB_PATH = profile_data_path(city, "buildings_db", "buildings.db")
+    OSM_POIS_PATH = profile_data_path(city, "osm_pois", "osm", "pois.geojson")
+    MEDICAL_PATH = profile_data_path(city, "medical", "osm", "medical.geojson")
+    COOLING_PATH = profile_data_path(city, "cooling", "cooling", "cooling.geojson")
+    TREES_PATH = profile_data_path(city, "trees", "trees", "trees.geojson")
+    CRIME_PATH = profile_data_path(city, "crime", "safety", "crime.geojson")
+    CRASH_PATH = profile_data_path(city, "crashes", "safety", "crashes.geojson")
+    FOOD_ESTABLISHMENTS_PATH = profile_data_path(
+        city, "food_establishments", "safety", "food_establishments.csv"
+    )
+    TREES_CANOPY_PNG = (
+        "trees_canopy.png"
+        if city.id == DEFAULT_CITY_ID
+        else f"trees_canopy_{city.id}.png"
+    )
 
 # Heat-response thresholds (matches scripts/download_medical.py scope).
 # Open-Meteo returns temperatures in Fahrenheit because the info panel
@@ -133,6 +173,51 @@ def _pick_tallest_near_center(valid_features, center_lat=42.36, center_lon=-71.0
     return best
 
 
+def _source_id(source):
+    return source.get("id") or source.get("label") or "source"
+
+
+def _source_label(source):
+    return source.get("label") or _source_id(source).replace("_", " ").title()
+
+
+def _feature_with_height(feat, source):
+    props = feat.get("properties") or {}
+    height_ft = height_from_properties_ft(props, source)
+    if height_ft is None or height_ft <= 0:
+        return None
+    return {
+        "type": "Feature",
+        "properties": {
+            **props,
+            "BLDG_HGT_2010": height_ft,
+            "height_ft": height_ft,
+            "source": _source_id(source),
+        },
+        "geometry": feat.get("geometry"),
+    }
+
+
+def _load_building_source_features(source):
+    path = source.get("path")
+    label = _source_label(source)
+    if not path or not os.path.exists(path):
+        print(f"  {label}: not downloaded")
+        return []
+    source_format = source.get("format") or "geojson"
+    if source_format != "geojson":
+        print(f"  {label}: unsupported building format {source_format}")
+        return []
+    with open(path) as f:
+        data = json.load(f)
+    valid = []
+    for feat in data.get("features", []):
+        normalized = _feature_with_height(feat, source)
+        if normalized is not None:
+            valid.append(normalized)
+    return valid
+
+
 def _load_buildings_from_db(scale_pct):
     """Load buildings from the pre-processed SQLite database.
 
@@ -146,10 +231,19 @@ def _load_buildings_from_db(scale_pct):
 
     features = []
     parsed = []
-    for city in ("cambridge", "boston"):
+    total_rows_loaded = 0
+    sources = CITY.building_sources
+    if not sources:
+        rows = c.execute("SELECT DISTINCT city FROM buildings").fetchall()
+        sources = tuple({"id": row[0], "label": row[0]} for row in rows)
+
+    for source in sources:
+        source_id = _source_id(source)
+        label = _source_label(source)
         rows = c.execute(
-            "SELECT height_ft, geom FROM buildings WHERE city = ?", (city,)
+            "SELECT height_ft, geom FROM buildings WHERE city = ?", (source_id,)
         ).fetchall()
+        total_rows_loaded += len(rows)
 
         if scale_pct == 0:
             # Still support "1 each" mode -- need JSON path for tallest-near-center
@@ -159,7 +253,7 @@ def _load_buildings_from_db(scale_pct):
 
         n = _sample_count(len(rows), scale_pct)
         sampled = random.sample(rows, min(n, len(rows)))
-        print(f"  {city.capitalize()} buildings: {len(sampled)}/{len(rows)}")
+        print(f"  {label}: {len(sampled)}/{len(rows)}")
         wkb_blobs = [row[1] for row in sampled]
         if wkb_blobs:
             polys = wkb_loads_batch(wkb_blobs)
@@ -177,7 +271,11 @@ def _load_buildings_from_db(scale_pct):
             ]
             features.append({
                 "type": "Feature",
-                "properties": {"BLDG_HGT_2010": round(float(height_ft), 1)},
+                "properties": {
+                    "BLDG_HGT_2010": round(float(height_ft), 1),
+                    "height_ft": round(float(height_ft), 1),
+                    "source": source_id,
+                },
                 "geometry": {
                     "type": "Polygon",
                     "coordinates": [coords],
@@ -185,6 +283,8 @@ def _load_buildings_from_db(scale_pct):
             })
 
     conn.close()
+    if total_rows_loaded == 0:
+        return None
     return {"type": "FeatureCollection", "features": features}, parsed
 
 
@@ -199,46 +299,20 @@ def load_buildings(scale_pct):
     random.seed(42)
     features = []
 
-    if os.path.exists(CAMBRIDGE_BUILDINGS_PATH):
-        with open(CAMBRIDGE_BUILDINGS_PATH) as f:
-            data = json.load(f)
-        valid = []
-        for feat in data["features"]:
-            props = feat.get("properties", {})
-            top_gl = props.get("TOP_GL")
-            if top_gl is not None and top_gl > 0:
-                new_feat = {
-                    "type": "Feature",
-                    "properties": {"BLDG_HGT_2010": round(top_gl * 3.28084, 1)},
-                    "geometry": feat["geometry"],
-                }
-                valid.append(new_feat)
+    for source in CITY.building_sources:
+        valid = _load_building_source_features(source)
+        if not valid:
+            continue
         if scale_pct == 0:
-            sampled = [_pick_tallest_near_center(valid)]
+            tallest = _pick_tallest_near_center(
+                valid, center_lat=MAP_CENTER[0], center_lon=MAP_CENTER[1]
+            )
+            sampled = [tallest] if tallest is not None else []
         else:
             n = _sample_count(len(valid), scale_pct)
             sampled = random.sample(valid, min(n, len(valid)))
         features.extend(sampled)
-        print(f"  Cambridge buildings: {len(sampled)}/{len(valid)}")
-
-    if os.path.exists(BOSTON_BUILDINGS_PATH):
-        with open(BOSTON_BUILDINGS_PATH) as f:
-            data = json.load(f)
-        valid = []
-        for feat in data["features"]:
-            props = feat.get("properties", {})
-            h = props.get("BLDG_HGT_2010")
-            if h is not None and h > 0:
-                valid.append(feat)
-        if scale_pct == 0:
-            sampled = [_pick_tallest_near_center(valid)]
-        else:
-            n = _sample_count(len(valid), scale_pct)
-            sampled = random.sample(valid, min(n, len(valid)))
-        features.extend(sampled)
-        print(f"  Boston buildings: {len(sampled)}/{len(valid)}")
-    else:
-        print("  Boston buildings: not downloaded")
+        print(f"  {_source_label(source)}: {len(sampled)}/{len(valid)}")
 
     return {"type": "FeatureCollection", "features": features}
 
@@ -260,39 +334,47 @@ def load_streetlights(scale_pct):
     random.seed(42)
     coords = []
 
-    boston_path = os.path.join(DATA_DIR, "streetlights", "streetlights.csv")
-    if os.path.exists(boston_path):
-        all_boston = []
-        with open(boston_path) as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                try:
-                    lat = float(row["Lat"])
-                    lon = float(row["Long"])
-                    if 42.2 < lat < 42.5 and -71.2 < lon < -70.9:
-                        all_boston.append([lat, lon])
-                except (ValueError, KeyError):
+    for source in CITY.streetlight_sources:
+        path = source.get("path")
+        label = _source_label(source)
+        if not path or not os.path.exists(path):
+            print(f"  {label}: not downloaded")
+            continue
+        source_format = source.get("format") or "geojson"
+        all_points = []
+        if source_format == "csv":
+            lat_field = source.get("lat_field") or "lat"
+            lon_field = source.get("lon_field") or "lon"
+            with open(path) as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    try:
+                        lat = float(row[lat_field])
+                        lon = float(row[lon_field])
+                    except (ValueError, KeyError):
+                        continue
+                    if point_in_bbox(lat, lon, INITIAL_BBOX):
+                        all_points.append([lat, lon])
+        elif source_format == "geojson":
+            with open(path) as f:
+                data = json.load(f)
+            for feat in data.get("features", []):
+                geom = feat.get("geometry", {})
+                if geom.get("type") != "Point":
                     continue
-        n = _sample_count(len(all_boston), scale_pct)
-        sampled = random.sample(all_boston, min(n, len(all_boston)))
+                coords_raw = geom.get("coordinates") or []
+                if len(coords_raw) < 2:
+                    continue
+                lon, lat = coords_raw[:2]
+                if point_in_bbox(lat, lon, INITIAL_BBOX):
+                    all_points.append([lat, lon])
+        else:
+            print(f"  {label}: unsupported streetlight format {source_format}")
+            continue
+        n = _sample_count(len(all_points), scale_pct)
+        sampled = random.sample(all_points, min(n, len(all_points)))
         coords.extend(sampled)
-        print(f"  Boston streetlights: {len(sampled)}/{len(all_boston)}")
-
-    cam_path = os.path.join(DATA_DIR, "cambridge", "streetlights", "streetlights.geojson")
-    if os.path.exists(cam_path):
-        all_cam = []
-        with open(cam_path) as f:
-            data = json.load(f)
-        for feat in data["features"]:
-            geom = feat.get("geometry", {})
-            if geom.get("type") == "Point":
-                lon, lat = geom["coordinates"][:2]
-                if 42.2 < lat < 42.5 and -71.2 < lon < -70.9:
-                    all_cam.append([lat, lon])
-        n = _sample_count(len(all_cam), scale_pct)
-        sampled = random.sample(all_cam, min(n, len(all_cam)))
-        coords.extend(sampled)
-        print(f"  Cambridge streetlights: {len(sampled)}/{len(all_cam)}")
+        print(f"  {label}: {len(sampled)}/{len(all_points)}")
 
     print(f"  Total streetlights: {len(coords)}")
     return coords
@@ -319,8 +401,7 @@ def load_safety_crime():
 
 
 def load_safety_crashes():
-    """Load Boston crash records (Vision Zero) as list of dicts with
-    lat/lon/mode."""
+    """Load crash records as list of dicts with lat/lon/mode."""
     if not os.path.exists(CRASH_PATH):
         print(f"  Crashes file not found: {CRASH_PATH}")
         return []
@@ -506,7 +587,7 @@ def load_cooling_centers():
 
 def load_food_establishments(scale_pct):
     random.seed(42)
-    path = os.path.join(DATA_DIR, "safety", "food_establishments.csv")
+    path = FOOD_ESTABLISHMENTS_PATH
     if not os.path.exists(path):
         print("  Food establishments file not found.")
         return []
@@ -519,7 +600,7 @@ def load_food_establishments(scale_pct):
                 lat = float(row["latitude"])
                 lon = float(row["longitude"])
                 name = row.get("businessname", "")
-                if 42.2 < lat < 42.5 and -71.2 < lon < -70.9:
+                if point_in_bbox(lat, lon, INITIAL_BBOX):
                     all_places.append({"lat": lat, "lon": lon, "name": name})
             except (ValueError, KeyError):
                 continue
@@ -567,7 +648,9 @@ def _load_buildings_and_shadows(scale_pct, target_time):
         return None, [], 0.0
 
     print("Computing shadows...")
-    shadows, _, _ = compute_all_shadows(parsed, target_time)
+    shadows, _, _ = compute_all_shadows(
+        parsed, target_time, lat=MAP_CENTER[0], lon=MAP_CENTER[1]
+    )
     print(f"  Shadows computed: {len(shadows)}")
 
     print("Computing shadow coverage...")
@@ -596,8 +679,8 @@ def _create_base_map(
     # a DOM node. Canvas draws them into a single <canvas> element, so
     # the browser handles the map smoothly even at the full city scale.
     #
-    # Default pan bounds are INITIAL_BBOX (MIT + central Cambridge + the
-    # Boston core) so day and night renderers share the same frame. A
+    # Default pan bounds are the active city bbox so day and night
+    # renderers share the same frame. A
     # caller can still pass wider bounds if a specific view needs them.
     #
     # lock_zoom=True pins the *minimum* zoom at zoom_start so the user
@@ -702,7 +785,7 @@ ONBOARDING_HTML = """
       Shade by day. Light by night.</p>
     <p style="margin:0 0 12px 0; font-size:14px; line-height:1.6;">
       This map shows <b>where shade falls</b> during the day and
-      <b>where streetlights shine</b> at night across Boston and Cambridge.</p>
+      <b>where streetlights shine</b> at night across __CITY_DISPLAY__.</p>
     <ul style="font-size:13px; line-height:1.8; padding-left:20px; margin:0 0 16px 0;">
       <li>Toggle <b>layers</b> on/off with the control (top-right)</li>
     </ul>
@@ -733,7 +816,8 @@ def _add_ui_plugins(m, theme="light"):
     MousePosition(position="bottomleft", separator=" | ", prefix="Coords: ").add_to(m)
     tile_layer = "CartoDB positron" if theme == "light" else "CartoDB dark_matter"
     MiniMap(toggle_display=True, minimized=True, tile_layer=tile_layer).add_to(m)
-    m.get_root().html.add_child(folium.Element(ONBOARDING_HTML))
+    onboarding = ONBOARDING_HTML.replace("__CITY_DISPLAY__", CITY.display_name)
+    m.get_root().html.add_child(folium.Element(onboarding))
 
 
 def _add_info_panel(m, lines, theme="light", position="left:60px"):
@@ -793,7 +877,7 @@ def build_day_map(target_time, altitude, azimuth, scale_pct,
         f"{building_count:,} buildings &middot; {len(shadows):,} shadows",
         f"<b>{coverage:.1f}%</b> of area in shadow",
         '<span style="color:#94a3b8; font-size:11px;">'
-        "Building heights: Boston 2010, Cambridge 2018</span>",
+        f"{CITY.source_notes.get('building_heights', 'Building heights from city data')}</span>",
     ])
     return m
 
@@ -824,7 +908,7 @@ def build_night_map(target_time, altitude, azimuth, scale_pct):
         f'<span style="color:#94a3b8;">{time_str}</span>',
         f"{len(coords):,} streetlights &middot; {len(places):,} food places",
         '<span style="color:#64748b; font-size:11px;">'
-        "Source: data.boston.gov, Cambridge GIS</span>",
+        f"{CITY.source_notes.get('night_sources', 'Source: city data')}</span>",
     ], theme="dark")
     return m
 
@@ -843,17 +927,19 @@ def build_time_map(target_time, scale_pct):
     for hour in TIME_STEPS:
         step_time = datetime(
             target_time.year, target_time.month, target_time.day,
-            hour, 0, tzinfo=BOSTON_TZ,
+            hour, 0, tzinfo=LOCAL_TZ,
         )
         timestamp = step_time.strftime("%Y-%m-%dT%H:%M:%S")
-        alt, az = get_sun_position(step_time)
+        alt, az = get_sun_position(step_time, lat=MAP_CENTER[0], lon=MAP_CENTER[1])
         print(f"  {step_time.strftime('%H:%M')}: alt={alt:.1f}, az={az:.1f}")
 
         if alt <= 0:
             print(f"    Skipped (sun below horizon)")
             continue
 
-        shadows, _, _ = compute_all_shadows(parsed, step_time)
+        shadows, _, _ = compute_all_shadows(
+            parsed, step_time, lat=MAP_CENTER[0], lon=MAP_CENTER[1]
+        )
         print(f"    Shadows: {len(shadows)}")
 
         for feat in shadows:
@@ -902,13 +988,13 @@ def build_time_map(target_time, scale_pct):
 def build_dual_map(target_time, scale_pct):
     day_time = datetime(
         target_time.year, target_time.month, target_time.day,
-        14, 0, tzinfo=BOSTON_TZ,
+        14, 0, tzinfo=LOCAL_TZ,
     )
     night_time = datetime(
         target_time.year, target_time.month, target_time.day,
-        22, 0, tzinfo=BOSTON_TZ,
+        22, 0, tzinfo=LOCAL_TZ,
     )
-    day_alt, _ = get_sun_position(day_time)
+    day_alt, _ = get_sun_position(day_time, lat=MAP_CENTER[0], lon=MAP_CENTER[1])
 
     print(f"Dual map: day={day_time.strftime('%H:%M')}, night={night_time.strftime('%H:%M')}")
 
@@ -967,7 +1053,8 @@ def build_dual_map(target_time, scale_pct):
         f"<b>Shadow Map</b> &middot; {day_time.strftime('%I:%M %p')}",
         sun_desc,
         f"{building_count:,} buildings &middot; <b>{coverage:.1f}%</b> in shadow",
-        '<span style="color:#94a3b8; font-size:10px;">Heights: Boston 2010, Cambridge 2018</span>',
+        '<span style="color:#94a3b8; font-size:10px;">'
+        f"{CITY.source_notes.get('building_heights', 'Heights from city data')}</span>",
     ], position="left:10px")
 
     _add_info_panel(dm.m1, [
@@ -1000,7 +1087,7 @@ def build_time_slider_map(target_time, scale_pct):
     # food) to INITIAL_BBOX = (min_lat, min_lon, max_lat, max_lon). No
     # background tier — anything outside the box is simply excluded.
     # Trims file size and speeds up first paint without sacrificing
-    # the Boston/Cambridge core that the app is actually about.
+    # the configured city frame that the app is actually about.
     bbox_min_lat, bbox_min_lon, bbox_max_lat, bbox_max_lon = INITIAL_BBOX
 
     def _in_bbox_latlon(lat, lon):
@@ -1111,7 +1198,7 @@ def build_time_slider_map(target_time, scale_pct):
     _PNG_W, _PNG_H = 4000, 2972  # ~1.85 m/pixel across INITIAL_BBOX
     _bbox_w = bbox_max_lon - bbox_min_lon
     _bbox_h = bbox_max_lat - bbox_min_lat
-    _trees_png_relpath = "trees_canopy.png"
+    _trees_png_relpath = TREES_CANOPY_PNG
     _trees_png_path = os.path.join(OUT_DIR, _trees_png_relpath)
     _img = _PILImage.new("RGBA", (_PNG_W, _PNG_H), (0, 0, 0, 0))
     _draw = _PILDraw.Draw(_img, "RGBA")
@@ -2158,6 +2245,8 @@ def build_time_slider_map(target_time, scale_pct):
   var STATIC_COUNTS = __STATIC_COUNTS__;
   var LAT_CENTER = __CENTER_LAT__;
   var LON_CENTER = __CENTER_LON__;
+  var CITY_NAME = __CITY_NAME__;
+  var CITY_TIMEZONE = __CITY_TIMEZONE__;
   var INITIAL_DATE = "__INITIAL_DATE__";
   var M_PER_DEG_LAT = 111320;
   var M_PER_DEG_LON = 111320 * Math.cos(LAT_CENTER * Math.PI / 180);
@@ -2188,27 +2277,50 @@ def build_time_slider_map(target_time, scale_pct):
     return ((slot % 24) + 24) % 24;
   }
 
-  // US DST rough check (2nd Sun of March to 1st Sun of November).
-  // Used so Boston-local wall-clock hour on the slider maps to the
-  // correct UTC moment regardless of the viewer's timezone.
-  function bostonUtcOffset(year, monthIdx, day) {
-    var march = new Date(Date.UTC(year, 2, 1));
-    var dstStart = new Date(Date.UTC(
-      year, 2, 1 + ((7 - march.getUTCDay()) % 7) + 7
-    ));
-    var november = new Date(Date.UTC(year, 10, 1));
-    var dstEnd = new Date(Date.UTC(
-      year, 10, 1 + ((7 - november.getUTCDay()) % 7)
-    ));
-    var today = new Date(Date.UTC(year, monthIdx, day));
-    return (today >= dstStart && today < dstEnd) ? -4 : -5;
+  function timeZoneParts(date, timeZone) {
+    var parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23"
+    }).formatToParts(date);
+    var values = {};
+    for (var i = 0; i < parts.length; i++) {
+      values[parts[i].type] = parts[i].value;
+    }
+    var hour = parseInt(values.hour || "0", 10);
+    if (hour === 24) hour = 0;
+    return {
+      year: parseInt(values.year, 10),
+      month: parseInt(values.month, 10),
+      day: parseInt(values.day, 10),
+      hour: hour,
+      minute: parseInt(values.minute || "0", 10),
+      second: parseInt(values.second || "0", 10)
+    };
   }
 
-  // Returns a Date whose UTC moment equals Boston wall-clock
-  // {year, month, day, hour, min}.
-  function bostonDate(year, monthIdx, day, hour, min) {
-    var off = bostonUtcOffset(year, monthIdx, day);
-    return new Date(Date.UTC(year, monthIdx, day, hour - off, min));
+  function cityUtcOffsetMinutes(date) {
+    var p = timeZoneParts(date, CITY_TIMEZONE);
+    var asUTC = Date.UTC(
+      p.year, p.month - 1, p.day, p.hour, p.minute, p.second
+    );
+    return Math.round((asUTC - date.getTime()) / 60000);
+  }
+
+  function cityDate(year, monthIdx, day, hour, min) {
+    var base = Date.UTC(year, monthIdx, day, hour, min);
+    var offset = cityUtcOffsetMinutes(new Date(base));
+    var zoned = new Date(base - offset * 60000);
+    var secondOffset = cityUtcOffsetMinutes(zoned);
+    if (secondOffset !== offset) {
+      zoned = new Date(base - secondOffset * 60000);
+    }
+    return zoned;
   }
 
   // Andrew's monotone chain convex hull in 2D. Vertices: [[lon, lat]...]
@@ -2289,23 +2401,14 @@ def build_time_slider_map(target_time, scale_pct):
       return { y: parts[0], m: parts[1] - 1, d: parts[2] };
     }
 
-    function currentBostonClock() {
+    function currentCityClock() {
       try {
-        var parts = new Intl.DateTimeFormat("en-US", {
-          timeZone: "America/New_York",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          hour12: false
-        }).formatToParts(new Date());
-        var values = {};
-        for (var i = 0; i < parts.length; i++) {
-          values[parts[i].type] = parts[i].value;
-        }
+        var values = timeZoneParts(new Date(), CITY_TIMEZONE);
         var hour = parseInt(values.hour || "0", 10);
         if (hour === 24) hour = 0;
-        var dateStr = values.year + "-" + values.month + "-" + values.day;
+        var dateStr = values.year + "-"
+          + pad(values.month) + "-"
+          + pad(values.day);
         var slot = hour;
         if (hour < TIMELINE_START_SLOT) {
           var serviceDate = new Date(Date.UTC(
@@ -2344,8 +2447,8 @@ def build_time_slider_map(target_time, scale_pct):
       }
     }
 
-    function loadCurrentBostonTime() {
-      var now = currentBostonClock();
+    function loadCurrentCityTime() {
+      var now = currentCityClock();
       state.dateStr = now.dateStr;
       state.slot = now.slot;
       dateEl.value = now.dateStr;
@@ -2356,7 +2459,7 @@ def build_time_slider_map(target_time, scale_pct):
       var p = parseDateStr(dateStr);
       var hour = slot;
       var min = 0;
-      var d = bostonDate(p.y, p.m, p.d, hour, min);
+      var d = cityDate(p.y, p.m, p.d, hour, min);
       var pos = SunCalc.getPosition(d, LAT_CENTER, LON_CENTER);
       // SunCalc: azimuth measured from south, west-positive.
       // Convert to compass bearing (from north, clockwise) to match
@@ -2369,28 +2472,23 @@ def build_time_slider_map(target_time, scale_pct):
       };
     }
 
-    function localHourFraction(dt, utcOffset) {
-      var utcH = dt.getUTCHours() + (dt.getUTCMinutes() / 60);
-      var localH = (utcH + utcOffset + 24) % 24;
-      var hh = Math.floor(localH);
-      var mm = Math.round((localH - hh) * 60);
-      if (mm === 60) { hh = (hh + 1) % 24; mm = 0; }
-      return hh + mm / 60;
+    function localHourFraction(dt) {
+      var p = timeZoneParts(dt, CITY_TIMEZONE);
+      return p.hour + p.minute / 60;
     }
 
     function sunWindowForDate(dateStr) {
       var p = parseDateStr(dateStr);
-      var noon = bostonDate(p.y, p.m, p.d, 12, 0);
+      var noon = cityDate(p.y, p.m, p.d, 12, 0);
       var times = SunCalc.getTimes(noon, LAT_CENTER, LON_CENTER);
       if (!times.sunrise || !times.sunset ||
           isNaN(times.sunrise.getTime()) ||
           isNaN(times.sunset.getTime())) {
         return null;
       }
-      var off = bostonUtcOffset(p.y, p.m, p.d);
       return {
-        sunrise: localHourFraction(times.sunrise, off),
-        sunset: localHourFraction(times.sunset, off)
+        sunrise: localHourFraction(times.sunrise),
+        sunset: localHourFraction(times.sunset)
       };
     }
 
@@ -2605,9 +2703,8 @@ def build_time_slider_map(target_time, scale_pct):
       }
     }).addTo(map);
 
-    // Construct a Date whose LOCAL hour/minute match the slider slot,
-    // so opening_hours.js (which uses local getHours/getDay) reads the
-    // Boston wall-clock values regardless of the viewer's own timezone.
+    // Construct a Date whose local fields match the slider slot, so
+    // opening_hours.js reads the configured city wall-clock values.
     function ohDate(dateStr, slot) {
       var p = parseDateStr(dateStr);
       return new Date(p.y, p.m, p.d, slot, 0, 0);
@@ -3350,10 +3447,9 @@ def build_time_slider_map(target_time, scale_pct):
 
     function updateSunMarkers() {
       var p = parseDateStr(state.dateStr);
-      // Noon Boston time is a safe reference for sunrise/sunset.
-      var noon = bostonDate(p.y, p.m, p.d, 12, 0);
+      var noon = cityDate(p.y, p.m, p.d, 12, 0);
       var nextBase = new Date(Date.UTC(p.y, p.m, p.d + 1, 12, 0));
-      var nextNoon = bostonDate(
+      var nextNoon = cityDate(
         nextBase.getUTCFullYear(),
         nextBase.getUTCMonth(),
         nextBase.getUTCDate(),
@@ -3363,24 +3459,12 @@ def build_time_slider_map(target_time, scale_pct):
       var t = SunCalc.getTimes(noon, LAT_CENTER, LON_CENTER);
       var nextT = SunCalc.getTimes(nextNoon, LAT_CENTER, LON_CENTER);
       if (!t.sunrise || isNaN(t.sunrise.getTime())) return;
-      var off = bostonUtcOffset(p.y, p.m, p.d);
-      var nextOff = bostonUtcOffset(
-        nextBase.getUTCFullYear(),
-        nextBase.getUTCMonth(),
-        nextBase.getUTCDate()
-      );
-      // Convert UTC to Boston local hour/min so the slider mapping
-      // (slot = local hour) is consistent.
-      function localHm(dt, utcOffset) {
-        var utcH = dt.getUTCHours() + (dt.getUTCMinutes() / 60);
-        var localH = (utcH + utcOffset + 24) % 24;
-        var hh = Math.floor(localH);
-        var mm = Math.round((localH - hh) * 60);
-        if (mm === 60) { hh = (hh + 1) % 24; mm = 0; }
-        return [hh, mm];
+      function localHm(dt) {
+        var p = timeZoneParts(dt, CITY_TIMEZONE);
+        return [p.hour, p.minute];
       }
-      var sr = localHm(t.sunrise, off);
-      var ss = localHm(t.sunset, off);
+      var sr = localHm(t.sunrise);
+      var ss = localHm(t.sunset);
       var srFrac = sr[0] + sr[1] / 60;
       var ssFrac = ss[0] + ss[1] / 60;
       function placeMarker(marker, label, slotFrac, text) {
@@ -3408,7 +3492,7 @@ def build_time_slider_map(target_time, scale_pct):
       );
       if (nextT.sunrise && !isNaN(nextT.sunrise.getTime()) &&
           nsMarker && nsLabel) {
-        var ns = localHm(nextT.sunrise, nextOff);
+        var ns = localHm(nextT.sunrise);
         var nsFrac = 24 + ns[0] + ns[1] / 60;
         placeMarker(
           nsMarker, nsLabel, nsFrac,
@@ -3515,7 +3599,7 @@ def build_time_slider_map(target_time, scale_pct):
         + "apparent_temperature_max,"
         + "uv_index_max,weather_code"
         + "&temperature_unit=fahrenheit"
-        + "&timezone=America%2FNew_York"
+        + "&timezone=" + encodeURIComponent(CITY_TIMEZONE)
         + "&start_date=" + dateStr + "&end_date=" + dateStr;
       weatherEl.textContent = "Loading weather...";
       fetch(url)
@@ -3772,7 +3856,7 @@ def build_time_slider_map(target_time, scale_pct):
       var c = map.getCenter();
       var weatherText = weatherEl ? weatherEl.textContent : "";
       return {
-        app: "LightMap Boston and Cambridge",
+        app: "LightMap " + CITY_NAME,
         action: action || "view",
         date: state.dateStr,
         hour: state.slot,
@@ -4301,7 +4385,7 @@ def build_time_slider_map(target_time, scale_pct):
       }
     });
 
-    loadCurrentBostonTime();
+    loadCurrentCityTime();
     updateSunMarkers();
     updateScene();
     fetchWeather(state.dateStr);
@@ -4342,7 +4426,9 @@ def build_time_slider_map(target_time, scale_pct):
         .replace("__STREET_NAME__", streetlight_group.get_name())
         .replace("__INITIAL_DATE__", target_time.strftime("%Y-%m-%d"))
         .replace("__CENTER_LAT__", str(MAP_CENTER[0]))
-        .replace("__CENTER_LON__", str(MAP_CENTER[1])))
+        .replace("__CENTER_LON__", str(MAP_CENTER[1]))
+        .replace("__CITY_NAME__", json.dumps(CITY.display_name))
+        .replace("__CITY_TIMEZONE__", json.dumps(CITY.timezone)))
     slider_html = slider_html.replace(
         "__INITIAL_DATE__", target_time.strftime("%Y-%m-%d")
     )
@@ -4386,7 +4472,9 @@ def build_map(target_time, scale_pct=1, dual=False, time_compare=False,
     elif dual:
         m = build_dual_map(target_time, scale_pct)
     else:
-        altitude, azimuth = get_sun_position(target_time)
+        altitude, azimuth = get_sun_position(
+            target_time, lat=MAP_CENTER[0], lon=MAP_CENTER[1]
+        )
         is_day = altitude > 0
         mode = "Day" if is_day else "Night"
         print(f"Time: {target_time.strftime('%Y-%m-%d %H:%M %Z')}")
@@ -4416,6 +4504,10 @@ def main():
     parser.add_argument(
         "--time", type=str, default="2026-04-20 14:00",
         help="Target time (YYYY-MM-DD HH:MM)",
+    )
+    parser.add_argument(
+        "--city", default=DEFAULT_CITY_ID,
+        help="City profile id under cities/. Default: boston-cambridge.",
     )
     parser.add_argument(
         "--night", action="store_true",
@@ -4451,11 +4543,13 @@ def main():
     )
     args = parser.parse_args()
 
+    set_active_city(load_city_profile(args.city))
+
     if args.night:
-        target_time = datetime(2026, 4, 20, 22, 0, tzinfo=BOSTON_TZ)
+        target_time = datetime(2026, 4, 20, 22, 0, tzinfo=LOCAL_TZ)
     else:
         target_time = datetime.strptime(args.time, "%Y-%m-%d %H:%M")
-        target_time = target_time.replace(tzinfo=BOSTON_TZ)
+        target_time = target_time.replace(tzinfo=LOCAL_TZ)
 
     build_map(target_time, args.scale, dual=args.dual,
               time_compare=args.time_compare,

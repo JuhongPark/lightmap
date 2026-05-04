@@ -22,6 +22,10 @@ from shapely.ops import unary_union
 from shapely.validation import make_valid
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
+
+from city_config import DEFAULT_CITY_ID, load_city_profile, profile_data_path
+
 TREES_PATH = os.path.join(REPO_ROOT, "data", "trees", "trees.geojson")
 WATER_PATH = os.path.join(REPO_ROOT, "data", "water", "water.geojson")
 
@@ -40,18 +44,25 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--dry-run", action="store_true",
                         help="Do not write trees.geojson back.")
+    parser.add_argument(
+        "--city", default=DEFAULT_CITY_ID,
+        help="City profile id under cities/. Default: boston-cambridge.",
+    )
     args = parser.parse_args()
+    city = load_city_profile(args.city)
+    trees_path = profile_data_path(city, "trees", "trees", "trees.geojson")
+    water_path = profile_data_path(city, "water", "water", "water.geojson")
 
-    if not os.path.exists(TREES_PATH):
-        print(f"missing {TREES_PATH}", file=sys.stderr)
+    if not os.path.exists(trees_path):
+        print(f"missing {trees_path}", file=sys.stderr)
         return 2
-    if not os.path.exists(WATER_PATH):
-        print(f"missing {WATER_PATH}. Run scripts/download_water.py first.",
+    if not os.path.exists(water_path):
+        print(f"missing {water_path}. Run scripts/download_water.py first.",
               file=sys.stderr)
         return 2
 
-    trees_fc = _load_fc(TREES_PATH)
-    water_fc = _load_fc(WATER_PATH)
+    trees_fc = _load_fc(trees_path)
+    water_fc = _load_fc(water_path)
 
     water_geoms = []
     invalid = 0
@@ -144,10 +155,10 @@ def main():
         return 0
 
     fc = {"type": "FeatureCollection", "features": cleaned}
-    with open(TREES_PATH, "w") as f:
+    with open(trees_path, "w") as f:
         json.dump(fc, f, separators=(",", ":"))
-    size_kb = os.path.getsize(TREES_PATH) / 1024
-    print(f"Saved {TREES_PATH} ({size_kb:.1f} KB)")
+    size_kb = os.path.getsize(trees_path) / 1024
+    print(f"Saved {trees_path} ({size_kb:.1f} KB)")
     return 0
 
 

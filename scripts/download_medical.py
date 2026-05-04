@@ -1,4 +1,4 @@
-"""Download OSM hospitals inside INITIAL_BBOX via Overpass.
+"""Download OSM hospitals inside a LightMap city bbox via Overpass.
 
 Fetches nodes, ways, and relations tagged `amenity=hospital`, plus any
 `amenity=clinic` with `emergency=yes`. The `emergency` tag is preserved
@@ -28,12 +28,9 @@ import urllib.parse
 import urllib.request
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-DATA_DIR = os.path.join(REPO_ROOT, "data")
-OUT_PATH = os.path.join(DATA_DIR, "osm", "medical.geojson")
+sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
 
-# Must match src/render/strategies.py INITIAL_BBOX.
-# (min_lat, min_lon, max_lat, max_lon)
-INITIAL_BBOX = (42.335, -71.130, 42.385, -71.040)
+from city_config import DEFAULT_CITY_ID, load_city_profile, profile_data_path
 
 OVERPASS_ENDPOINTS = (
     "https://overpass-api.de/api/interpreter",
@@ -113,18 +110,26 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--force", action="store_true",
                         help="Redownload even if output already exists.")
+    parser.add_argument(
+        "--city", default=DEFAULT_CITY_ID,
+        help="City profile id under cities/. Default: boston-cambridge.",
+    )
     args = parser.parse_args()
+    city = load_city_profile(args.city)
+    out_path = profile_data_path(city, "medical", "osm", "medical.geojson")
 
-    if os.path.exists(OUT_PATH) and not args.force:
-        size_kb = os.path.getsize(OUT_PATH) / 1024
-        print(f"[skip] {OUT_PATH} already exists ({size_kb:.1f} KB). "
+    if os.path.exists(out_path) and not args.force:
+        size_kb = os.path.getsize(out_path) / 1024
+        print(f"[skip] {out_path} already exists ({size_kb:.1f} KB). "
               f"Use --force to redownload.")
         return 0
 
-    os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     print("OSM hospitals + emergency clinics (Overpass):")
-    query = build_query(INITIAL_BBOX)
+    print(f"  City: {city.display_name}")
+    print(f"  BBox: {city.bbox}")
+    query = build_query(city.bbox)
     js = fetch(query, OVERPASS_ENDPOINTS)
     elements = js.get("elements", [])
     print(f"  Raw elements: {len(elements)}")
@@ -137,10 +142,10 @@ def main():
     )
     print(f"  Kept: {kept} features ({emergency} with emergency=yes)")
 
-    with open(OUT_PATH, "w") as f:
+    with open(out_path, "w") as f:
         json.dump(gj, f, separators=(",", ":"))
-    size_kb = os.path.getsize(OUT_PATH) / 1024
-    print(f"  Saved {OUT_PATH} ({size_kb:.1f} KB)")
+    size_kb = os.path.getsize(out_path) / 1024
+    print(f"  Saved {out_path} ({size_kb:.1f} KB)")
     return 0
 
 

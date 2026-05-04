@@ -1,0 +1,59 @@
+{
+  "id": "boston-cambridge",
+  "name": "Boston and Cambridge",
+  "display_name": "Boston and Cambridge, MA",
+  "timezone": "America/New_York",
+  "center": [42.3601, -71.0942],
+  "bbox": [42.335, -71.13, 42.385, -71.04],
+  "paths": {
+    "buildings_db": "data/buildings.db",
+    "osm_pois": "data/osm/pois.geojson",
+    "medical": "data/osm/medical.geojson",
+    "cooling": "data/cooling/cooling.geojson",
+    "trees": "data/trees/trees.geojson",
+    "water": "data/water/water.geojson",
+    "crime": "data/safety/crime.geojson",
+    "crashes": "data/safety/crashes.geojson",
+    "food_establishments": "data/safety/food_establishments.csv"
+  },
+  "building_sources": [
+    {
+      "id": "cambridge",
+      "label": "Cambridge buildings",
+      "path": "data/cambridge/buildings/buildings.geojson",
+      "format": "geojson",
+      "height_field": "TOP_GL",
+      "height_unit": "m",
+      "default_height_ft": 20
+    },
+    {
+      "id": "boston",
+      "label": "Boston buildings",
+      "path": "data/buildings/boston_buildings.geojson",
+      "format": "geojson",
+      "height_field": "BLDG_HGT_2010",
+      "height_unit": "ft",
+      "default_height_ft": 20
+    }
+  ],
+  "streetlight_sources": [
+    {
+      "id": "boston",
+      "label": "Boston streetlights",
+      "path": "data/streetlights/streetlights.csv",
+      "format": "csv",
+      "lat_field": "Lat",
+      "lon_field": "Long"
+    },
+    {
+      "id": "cambridge",
+      "label": "Cambridge streetlights",
+      "path": "data/cambridge/streetlights/streetlights.geojson",
+      "format": "geojson"
+    }
+  ],
+  "source_notes": {
+    "building_heights": "Building heights: Boston 2010, Cambridge 2018",
+    "night_sources": "Source: data.boston.gov, Cambridge GIS"
+  }
+}

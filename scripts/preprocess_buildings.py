@@ -19,6 +19,7 @@ Usage:
     .venv/bin/python scripts/preprocess_buildings.py
 """
 
+import argparse
 import json
 import os
 import sqlite3
@@ -30,15 +31,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from shapely.geometry import shape
 from shapely.wkb import dumps
 
+from city_config import (
+    DEFAULT_CITY_ID,
+    height_from_properties_ft,
+    load_city_profile,
+    profile_data_path,
+)
 from shadow.compute import _extract_polygon
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
-BOSTON_PATH = os.path.join(DATA_DIR, "buildings", "boston_buildings.geojson")
-CAMBRIDGE_PATH = os.path.join(DATA_DIR, "cambridge", "buildings", "buildings.geojson")
-DB_PATH = os.path.join(DATA_DIR, "buildings.db")
-
-
 def create_db(path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     if os.path.exists(path):
         os.remove(path)
     conn = sqlite3.connect(path)
@@ -61,30 +63,15 @@ def create_db(path):
     return conn
 
 
-def insert_features(conn, features, city, height_conversion=1.0):
+def insert_features(conn, features, source):
     c = conn.cursor()
     rows = []
+    source_id = source.get("id") or source.get("label") or "source"
     for feat in features:
         props = feat.get("properties", {})
-        if city == "cambridge":
-            h = props.get("TOP_GL")
-            if h is None or h <= 0:
-                # Cambridge TOP_GL missing: assume ~2-story residential.
-                # Source data drops these silently, which leaves ~18 %
-                # of Boston buildings with no footprint AND no shadow.
-                # A 20 ft default casts a ~10 ft (3 m) shadow at 2 pm,
-                # visible on the 2 m-per-px shadow PNG. Better an honest
-                # default than a missing building.
-                h = 6.1  # 20 ft in meters
-            height_ft = round(h * 3.28084, 1)
-        else:
-            h = props.get("BLDG_HGT_2010")
-            if h is None or h <= 0:
-                # Boston: 23 487 of 128 608 buildings (18.3 %) have
-                # BLDG_HGT_2010 NULL or 0 in the 2010 vintage. Default
-                # to 20 ft for the same reason as above.
-                h = 20.0
-            height_ft = float(h)
+        height_ft = height_from_properties_ft(props, source)
+        if height_ft is None:
+            continue
         try:
             geom = shape(feat["geometry"])
             poly = _extract_polygon(geom)
@@ -92,7 +79,7 @@ def insert_features(conn, features, city, height_conversion=1.0):
                 continue
             minx, miny, maxx, maxy = poly.bounds
             wkb = dumps(poly)
-            rows.append((city, height_ft, minx, miny, maxx, maxy, wkb))
+            rows.append((source_id, height_ft, minx, miny, maxx, maxy, wkb))
         except Exception:
             continue
     c.executemany(
@@ -105,33 +92,44 @@ def insert_features(conn, features, city, height_conversion=1.0):
 
 
 def main():
-    print(f"Output: {DB_PATH}")
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument(
+        "--city", default=DEFAULT_CITY_ID,
+        help="City profile id under cities/. Default: boston-cambridge.",
+    )
+    args = parser.parse_args()
+
+    city = load_city_profile(args.city)
+    db_path = profile_data_path(city, "buildings_db", "buildings.db")
+
+    print(f"City: {city.display_name}")
+    print(f"Output: {db_path}")
     t0 = time.perf_counter()
-    conn = create_db(DB_PATH)
+    conn = create_db(db_path)
 
-    # Cambridge
-    print(f"Parsing Cambridge: {CAMBRIDGE_PATH}")
-    with open(CAMBRIDGE_PATH) as f:
-        cam_data = json.load(f)
-    n_cam = insert_features(conn, cam_data["features"], "cambridge")
-    print(f"  {n_cam:,} Cambridge buildings inserted")
-
-    # Boston
-    print(f"Parsing Boston: {BOSTON_PATH}")
-    with open(BOSTON_PATH) as f:
-        bos_data = json.load(f)
-    n_bos = insert_features(conn, bos_data["features"], "boston")
-    print(f"  {n_bos:,} Boston buildings inserted")
+    total = 0
+    for source in city.building_sources:
+        label = source.get("label") or source.get("id") or "buildings"
+        path = source.get("path")
+        if not path or not os.path.exists(path):
+            print(f"Skipping {label}: missing {path}")
+            continue
+        print(f"Parsing {label}: {path}")
+        with open(path) as f:
+            data = json.load(f)
+        n = insert_features(conn, data.get("features", []), source)
+        total += n
+        print(f"  {n:,} {label} inserted")
 
     conn.execute("ANALYZE")
     conn.commit()
     conn.close()
 
     elapsed = time.perf_counter() - t0
-    size_mb = os.path.getsize(DB_PATH) / 1024 / 1024
+    size_mb = os.path.getsize(db_path) / 1024 / 1024
     print(f"\nDone in {elapsed:.1f}s")
     print(f"DB size: {size_mb:.1f} MB")
-    print(f"Total buildings: {n_cam + n_bos:,}")
+    print(f"Total buildings: {total:,}")
 
 
 if __name__ == "__main__":

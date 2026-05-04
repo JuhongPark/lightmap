@@ -1,4 +1,4 @@
-"""Fetch water polygons (river, lake, ocean) for INITIAL_BBOX from OSM.
+"""Fetch water polygons for a LightMap city from OSM.
 
 Uses Overpass API to pull `natural=water` and `waterway=river|stream`
 relations and ways inside the viewport clamp. Resolves multipolygon
@@ -19,10 +19,9 @@ import sys
 import httpx
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-OUT_PATH = os.path.join(REPO_ROOT, "data", "water", "water.geojson")
+sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
 
-# Must match src/render/strategies.py INITIAL_BBOX.
-INITIAL_BBOX = (42.335, -71.130, 42.385, -71.040)  # min_lat, min_lon, max_lat, max_lon
+from city_config import DEFAULT_CITY_ID, load_city_profile, profile_data_path
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
@@ -133,18 +132,24 @@ def ways_and_rels_to_features(osm):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--city", default=DEFAULT_CITY_ID,
+        help="City profile id under cities/. Default: boston-cambridge.",
+    )
     args = parser.parse_args()
+    city = load_city_profile(args.city)
+    out_path = profile_data_path(city, "water", "water", "water.geojson")
 
-    if os.path.exists(OUT_PATH) and not args.force:
-        size_kb = os.path.getsize(OUT_PATH) / 1024
-        print(f"[skip] {OUT_PATH} already exists ({size_kb:.1f} KB). "
+    if os.path.exists(out_path) and not args.force:
+        size_kb = os.path.getsize(out_path) / 1024
+        print(f"[skip] {out_path} already exists ({size_kb:.1f} KB). "
               f"Use --force to redownload.")
         return 0
 
-    os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
-    q = overpass_query(INITIAL_BBOX)
-    print(f"POST Overpass query (bbox {INITIAL_BBOX})")
+    q = overpass_query(city.bbox)
+    print(f"POST Overpass query for {city.display_name} (bbox {city.bbox})")
     with httpx.Client(timeout=180, follow_redirects=True,
                       headers={"User-Agent": "lightmap/0.1"}) as c:
         resp = c.post(OVERPASS_URL, data={"data": q})
@@ -158,10 +163,10 @@ def main():
     print(f"Parsed {len(feats)} water features")
 
     fc = {"type": "FeatureCollection", "features": feats}
-    with open(OUT_PATH, "w") as f:
+    with open(out_path, "w") as f:
         json.dump(fc, f, separators=(",", ":"))
-    size_kb = os.path.getsize(OUT_PATH) / 1024
-    print(f"Saved {OUT_PATH} ({size_kb:.1f} KB)")
+    size_kb = os.path.getsize(out_path) / 1024
+    print(f"Saved {out_path} ({size_kb:.1f} KB)")
     return 0
 
 

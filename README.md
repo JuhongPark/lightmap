@@ -4,7 +4,7 @@
 
 **Live demo:** [LightMap](https://juhongpark.github.io/lightmap/LightMap.html) — scrub through any date and time. Shade moves with the sun, twilight phases mark dawn and dusk, and streetlights plus open-venue activity switch on at night.
 
-An interactive web map that shows where shade falls during the day and where light shines at night in Boston and Cambridge, MA. Uses real-time sun position, building geometry, streetlight locations, and tree canopy data.
+An interactive web map that shows where shade falls during the day and where light shines at night. The shipped profile covers Boston and Cambridge, MA. City profiles under `cities/` make the time-slider reusable for other cities with public building, streetlight, venue, and canopy data.
 
 Built by **Juhong Park** (System Design and Management, MIT) as a term project for [**MIT 1.001: Engineering Computation and Data Science**](https://student.mit.edu/catalog/search.cgi?search=1.001) (Spring 2026), taught by [Abel Sanchez](https://abel.mit.edu/) and [John R. Williams](https://johntango.github.io/). Course website: [onexi.org](https://onexi.org).
 
@@ -94,6 +94,43 @@ Rerun `scripts/download_osm_pois.py` to refresh the snapshot.
 
 See [planning/data-catalog.md](planning/data-catalog.md) for the full data catalog.
 
+## Adding City Data
+
+LightMap reads its production time-slider scope from `cities/<city-id>.json`.
+The default profile is `cities/boston-cambridge.json`. A new profile defines:
+
+- `timezone`, `center`, and `bbox`.
+- Building GeoJSON sources, including the height field and unit.
+- Streetlight sources as CSV or GeoJSON points.
+- Optional layer paths for OSM POIs, tree canopy, water, medical, cooling, crime, and crash reference data.
+
+Raw datasets stay under `data/`, which is gitignored. For a new city, use
+`data/cities/<city-id>/...` unless the profile points somewhere else.
+
+Generic OSM-backed layers can be pulled with the profile bbox:
+
+```
+.venv/bin/python scripts/download_osm_pois.py --city your-city
+.venv/bin/python scripts/download_water.py --city your-city
+.venv/bin/python scripts/download_cooling.py --city your-city
+.venv/bin/python scripts/download_medical.py --city your-city
+```
+
+Then pre-process buildings and build the time-slider:
+
+```
+.venv/bin/python scripts/preprocess_buildings.py --city your-city
+.venv/bin/python src/prototype.py --city your-city --time-slider --out LightMap-your-city.html --scale 100
+```
+
+City-data PRs are welcome. A good PR adds a `cities/<city-id>.json` profile,
+documents public data sources, and includes any small downloader or adapter
+needed to reproduce the local `data/cities/<city-id>/...` files. Do not commit
+large raw datasets unless they are tiny, public, license-clean, and necessary
+for a test fixture. Keep public copy framed around shade, brightness,
+visibility, lighting context, and historic incident reference data. Do not make
+route safety claims.
+
 ## Getting Started
 
 ### Prerequisites
@@ -175,6 +212,7 @@ Available flags:
 | Flag | Effect |
 | --- | --- |
 | `--time-slider` | Build the interactive time-slider HTML. This is the only supported output. |
+| `--city ID` | Use a city profile from `cities/`. Default `boston-cambridge`. |
 | `--scale N` | Percent of data to render. Valid values: 0, 1, 10, 50, 100. Default 1. Use 100 for the shipping build. |
 | `--out NAME` | Output filename under `docs/`. Default `LightMap.html` for the time-slider. |
 | `--time "YYYY-MM-DD HH:MM"` | Starting timestamp the slider opens at. |

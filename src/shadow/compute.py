@@ -36,7 +36,8 @@ def get_sun_position(dt, lat=LAT_CENTER, lon=-71.06):
     return altitude, azimuth
 
 
-def compute_shadow(building_polygon, height_ft, sun_altitude, sun_azimuth):
+def compute_shadow(building_polygon, height_ft, sun_altitude, sun_azimuth,
+                   lat_center=LAT_CENTER):
     if sun_altitude <= 0:
         return None, 0
 
@@ -48,7 +49,8 @@ def compute_shadow(building_polygon, height_ft, sun_altitude, sun_azimuth):
     dx_m = shadow_length_m * math.sin(shadow_dir)
     dy_m = shadow_length_m * math.cos(shadow_dir)
 
-    dx_deg = dx_m / M_PER_DEG_LON
+    m_per_deg_lon = M_PER_DEG_LAT * math.cos(math.radians(lat_center))
+    dx_deg = dx_m / m_per_deg_lon
     dy_deg = dy_m / M_PER_DEG_LAT
 
     translated = affinity.translate(building_polygon, xoff=dx_deg, yoff=dy_deg)
@@ -144,7 +146,8 @@ def _shadow_feature(shadow_poly, height_ft, shadow_len_m):
     }
 
 
-def compute_all_shadows(source, dt, height_field="BLDG_HGT_2010"):
+def compute_all_shadows(source, dt, height_field="BLDG_HGT_2010",
+                        lat=LAT_CENTER, lon=-71.06):
     """Compute shadow polygons for all buildings in source.
 
     source can be:
@@ -170,14 +173,16 @@ def compute_all_shadows(source, dt, height_field="BLDG_HGT_2010"):
     else:
         raise TypeError(f"Unsupported source type: {type(source)}")
 
-    altitude, azimuth = get_sun_position(dt)
+    altitude, azimuth = get_sun_position(dt, lat=lat, lon=lon)
 
     if altitude <= 0:
         return [], altitude, azimuth
 
     features = []
     for poly, height_ft in buildings:
-        shadow, shadow_len = compute_shadow(poly, height_ft, altitude, azimuth)
+        shadow, shadow_len = compute_shadow(
+            poly, height_ft, altitude, azimuth, lat_center=lat
+        )
         if shadow is None:
             continue
         feat = _shadow_feature(shadow, height_ft, shadow_len)
