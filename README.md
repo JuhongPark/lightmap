@@ -207,6 +207,11 @@ The time-slider is the single production artifact. Build it with:
 
 Opens `docs/LightMap.html` in your browser. On load, the slider resets to the current Boston date and the nearest past hourly slot. During the day, building shade moves with the sun and a static green tree-canopy overlay fills in the rest of the shade. Click a point to ask when the local 17 m check ring is covered by building shadow or open to direct sun. Dawn and dusk use a distinct twilight theme. After sunset the basemap turns dark, the streetlight heatmap switches on as a bright-yellow glow, and OSM venues turn on one by one based on their real `opening_hours` tag. Weather and UV for the selected date are fetched live from Open-Meteo. Auto-play advances one hourly slot every 0.5 seconds.
 
+You can also open `docs/LightMap.html` directly as a static preview. The map
+still loads as a preview artifact, but LightTime Agent will show setup guidance
+inside its panel until the local agent server is running with `OPENAI_API_KEY`
+configured.
+
 Available flags:
 
 | Flag | Effect |
@@ -248,6 +253,10 @@ Then open:
 ```
 http://localhost:8765/LightMap.html
 ```
+
+If the static file is opened directly, or if this server is running without
+`OPENAI_API_KEY`, LightTime Agent shows setup guidance in its own panel instead
+of opening a popup.
 
 Optional settings:
 

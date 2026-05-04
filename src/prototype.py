@@ -2194,7 +2194,7 @@ def build_time_slider_map(target_time, scale_pct):
 <div id="lm-agent-host" aria-live="polite">
   <div id="lm-agent-title">
     <span>LightTime Agent</span>
-    <span id="lm-agent-status">local agent</span>
+    <span id="lm-agent-status">checking...</span>
   </div>
   <div id="lm-agent-actions">
     <div class="lm-agent-section">
@@ -2392,7 +2392,8 @@ def build_time_slider_map(target_time, scale_pct):
       agentHighlight: null, agentHighlightLabel: null,
       agentScan: null, agentScanLabel: null, agentRunId: 0,
       pointWindowKind: null, pointWindowAnalysis: null,
-      pointWindowBest: null
+      pointWindowBest: null,
+      agentBackend: "checking"
     };
     var streetlightHeatLayer = null;
 
@@ -3898,6 +3899,67 @@ def build_time_slider_map(target_time, scale_pct):
       if (agentStatusEl) agentStatusEl.textContent = text;
     }
 
+    function agentBackendReady() {
+      return state.agentBackend === "ready";
+    }
+
+    function agentSetupMessage() {
+      if (state.agentBackend === "missing-key") {
+        return "LightTime Agent is connected, but OPENAI_API_KEY is not set. Add OPENAI_API_KEY to .env and restart .venv/bin/python scripts/serve_agent.py 8765 docs.";
+      }
+      if (state.agentBackend === "static-preview") {
+        return "Static preview mode: the map can be viewed, but LightTime Agent needs the local API server. Add OPENAI_API_KEY to .env, then run .venv/bin/python scripts/serve_agent.py 8765 docs and open http://localhost:8765/LightMap.html.";
+      }
+      if (state.agentBackend === "unavailable") {
+        return "LightTime Agent is not connected. Add OPENAI_API_KEY to .env, run .venv/bin/python scripts/serve_agent.py 8765 docs, then open the localhost URL.";
+      }
+      return "Checking LightTime Agent connection...";
+    }
+
+    function agentSetupStatus() {
+      if (state.agentBackend === "ready") return "AI agent ready";
+      if (state.agentBackend === "missing-key") return "key needed";
+      if (state.agentBackend === "static-preview") return "preview mode";
+      if (state.agentBackend === "unavailable") return "setup needed";
+      return "checking...";
+    }
+
+    function showAgentSetupRequired() {
+      setAgentBusy(null, false);
+      clearAgentScan();
+      setAgentStatus(agentSetupStatus());
+      setAgentAnswer(agentSetupMessage());
+    }
+
+    function setAgentBackend(mode) {
+      state.agentBackend = mode;
+      setAgentStatus(agentSetupStatus());
+      if (mode === "ready") {
+        setAgentAnswer("");
+      } else {
+        setAgentAnswer(agentSetupMessage());
+      }
+    }
+
+    function refreshAgentHealth() {
+      if (window.location.protocol === "file:") {
+        setAgentBackend("static-preview");
+        return;
+      }
+      fetch("/api/agent/health", { cache: "no-store" })
+        .then(function(resp) {
+          if (!resp.ok) throw new Error("health unavailable");
+          return resp.json();
+        })
+        .then(function(data) {
+          setAgentBackend(data && data.openaiConfigured
+            ? "ready" : "missing-key");
+        })
+        .catch(function() {
+          setAgentBackend("unavailable");
+        });
+    }
+
     function setAgentBusy(action, busy) {
       if (agentHostEl) {
         agentHostEl.classList.toggle("is-busy", !!busy);
@@ -3964,7 +4026,7 @@ def build_time_slider_map(target_time, scale_pct):
         state.userMarker.setLatLng([lat, lon]);
       }
       clearPointWindowTrack();
-      setAgentStatus("location set");
+      setAgentStatus(agentBackendReady() ? "location set" : agentSetupStatus());
     }
 
     function clearAgentHighlight() {
@@ -4334,6 +4396,10 @@ def build_time_slider_map(target_time, scale_pct):
     for (var ac = 0; ac < agentChips.length; ac++) {
       agentChips[ac].addEventListener("click", function() {
         var action = this.getAttribute("data-action") || "view";
+        if (!agentBackendReady()) {
+          showAgentSetupRequired();
+          return;
+        }
         if (action === "point-shade" || action === "point-sun") {
           runPointSunAction(action);
         } else if (action === "point-active" || action === "point-zero") {
@@ -4347,7 +4413,11 @@ def build_time_slider_map(target_time, scale_pct):
     }
     map.on("click", function(e) {
       setAgentLocation(e.latlng.lat, e.latlng.lng, null, "map pin");
-      setAgentAnswer("");
+      if (agentBackendReady()) {
+        setAgentAnswer("");
+      } else {
+        setAgentAnswer(agentSetupMessage());
+      }
     });
 
     // Pan or zoom changes the viewport, so the culled shadow set must
@@ -4385,6 +4455,7 @@ def build_time_slider_map(target_time, scale_pct):
       }
     });
 
+    refreshAgentHealth();
     loadCurrentCityTime();
     updateSunMarkers();
     updateScene();

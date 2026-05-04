@@ -29,7 +29,7 @@ DEFAULT_REASONING_EFFORT = "medium"
 MAX_REQUEST_BYTES = 128 * 1024
 
 
-DEVELOPER_PROMPT = """You are LightMap Agent for a Boston and Cambridge map.
+DEVELOPER_PROMPT = """You are LightMap Agent for a city map.
 
 Answer from the supplied map context only. You may reason about which nearby
 areas appear more shaded or brighter, but do not invent street names, live
@@ -190,7 +190,10 @@ def _coerce_agent_result(text: str, context: dict[str, Any]) -> dict[str, Any]:
 def _call_openai(question: str, context: dict[str, Any]) -> dict[str, Any]:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        return _local_demo_agent(question, context)
+        raise RuntimeError(
+            "OpenAI API key is not configured. Add OPENAI_API_KEY to .env "
+            "and restart scripts/serve_agent.py."
+        )
 
     model = os.environ.get("LIGHTMAP_OPENAI_MODEL", DEFAULT_MODEL)
     effort = os.environ.get("LIGHTMAP_REASONING_EFFORT",
@@ -348,7 +351,7 @@ class AgentHandler(GzipStaticHandler):
                 "ok": True,
                 "openaiConfigured": bool(os.environ.get("OPENAI_API_KEY")),
                 "mode": "openai" if os.environ.get("OPENAI_API_KEY")
-                else "local-demo",
+                else "setup-required",
                 "model": os.environ.get("LIGHTMAP_OPENAI_MODEL",
                                         DEFAULT_MODEL),
                 "reasoningEffort": os.environ.get(
